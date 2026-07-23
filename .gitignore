@@ -1,0 +1,17 @@
+# Local database + generated data (recreated/seeded on first run)
+data/app.db
+data/export.json
+
+# Machine-specific configuration — copy config.ini.example to config.ini and
+# edit locally. Never commit your personal export path.
+config.ini
+
+# Server logs
+server-error.log
+
+# Python bytecode cache
+__pycache__/
+*.pyc
+
+# Editor / tooling
+.claude/

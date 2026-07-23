@@ -64,7 +64,9 @@ This log groups the work by area rather than by date.
 - **Export** to a real `.xlsx` with sheets: Project Details (including a Date
   Exported row), BOM Tree (with Excel outline grouping), BOM Flat, BOM By RFx
   (grouped), and an Import sheet. Key columns are centered; column widths
-  auto-fit.
+  auto-fit. The BOM By RFx group headers spread each piece — RFx, PO,
+  description, supplier, delivery date, status, and the part/qty roll-up —
+  across separate cells (not one merged cell).
 - **Import** reads real `.xlsx` files (handles Excel's compression) from the
   Import sheet; the template matches the export format; any new RFx values are
   added to the Orders table automatically.
@@ -74,10 +76,17 @@ This log groups the work by area rather than by date.
 - Data moved from browser storage to a **SQLite database** (`data/app.db`) via
   `server.py`, so clearing the browser no longer affects data.
 - **Excel data connection:** a live endpoint (`/api/data.json`, for Power
-  Query "From Web") and an auto-maintained `data/export.json` file that
-  rewrites on every change. Both expose flat, spreadsheet-friendly
-  `projects` / `orders` / `bomLines` tables. Discoverable via the Excel Data
-  dialog.
+  Query "From Web") and an auto-maintained JSON file that rewrites on every
+  change. Both expose flat, spreadsheet-friendly `projects` / `orders` /
+  `bomLines` tables. Discoverable via the Excel Data dialog.
+- **Shareable data file:** the JSON file can be relocated out of the app folder
+  onto a shared/network drive so others can query it, by setting `export_json`
+  in `config.ini` (or the `BOM_EXPORT_PATH` environment variable); it defaults
+  to `data/export.json`. The server stays `localhost`-only — only the file is
+  shared. Writes are hardened (auto-created target folder, unique temp file +
+  atomic rename, retry when the file is briefly locked) and moved to a
+  background thread, so a slow or unavailable share never delays or blocks saves
+  in the app.
 
 ## Running the app / infrastructure
 

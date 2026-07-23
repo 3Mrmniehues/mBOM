@@ -114,7 +114,7 @@
     </section>
 
     <section class="excel-option">
-      <h3>2. Local file</h3>
+      <h3>2. Shared file</h3>
       <p>A JSON file is kept in sync automatically — it's rewritten every time
         you change anything. In Excel use <strong>Get Data &rarr; From File &rarr; From JSON</strong>
         and point it at:</p>
@@ -122,6 +122,9 @@
         <input type="text" id="excelFilePath" readonly>
         <button type="button" class="tool-btn" id="copyPathBtn">Copy</button>
       </div>
+      <p class="excel-note">To let others query this file, move it to a shared
+        drive by setting <strong>export_json</strong> in <strong>config.ini</strong>
+        (in the app folder), then restart the app.</p>
       <p class="excel-note">Or grab a one-off snapshot now:</p>
       <button type="button" class="tool-btn" id="downloadJsonBtn">Download JSON snapshot</button>
     </section>

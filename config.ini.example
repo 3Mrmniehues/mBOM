@@ -1,0 +1,29 @@
+# mBOM app configuration  --  TEMPLATE
+# ----------------------------------------------------------------------------
+# Copy this file to "config.ini" in the app folder, then edit your copy.
+# config.ini is git-ignored, so your personal path never gets committed.
+#
+# Optional. If config.ini is missing, or the setting below is left blank/
+# commented, the app writes its query file to
+#     data\export.json   (inside the app folder).
+#
+# To make the data easy for other people to query, point export_json at a
+# shared/network location. The app writes a flat, spreadsheet-friendly JSON
+# snapshot there after every change; others open it from Excel (Power Query)
+# or their own scripts. The app server itself still runs only on this machine
+# (http://localhost:8791) - only the file is shared.
+#
+# Notes:
+#   * Remove the leading "#" on the export_json line to activate it.
+#   * Absolute paths are used as-is; this includes mapped drives (Z:\...) and
+#     UNC shares (\\server\share\...). Windows backslashes are fine here - do
+#     not double them.
+#   * A relative path is taken relative to the app folder.
+#   * The target folder is created automatically if it doesn't exist.
+#   * Naming the file bom-data.json at the destination keeps it recognizable.
+#   * A one-off override without editing this file: set the BOM_EXPORT_PATH
+#     environment variable (it takes precedence over this file).
+
+[paths]
+# export_json = Z:\Shared\mBOM\bom-data.json
+# export_json = \\fileserver\engineering\mBOM\bom-data.json

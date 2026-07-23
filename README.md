@@ -43,13 +43,48 @@ details, or use either of these directly:
 - **Live web connection (recommended):** in Excel, **Data → Get Data → From
   Other Sources → From Web**, and use `http://localhost:8791/api/data.json`.
   **Refresh** in Excel any time to pull current data. Add `?project=<id>` to
-  the URL to limit it to one project.
-- **Local file:** `data/export.json` is rewritten automatically on every
-  change, so it's always current. In Excel use **Get Data → From File → From
-  JSON**.
+  the URL to limit it to one project. (This only works on this machine, since
+  the server is `localhost`-only.)
+- **Shared file:** a JSON file is rewritten automatically on every change, so
+  it's always current. In Excel use **Get Data → From File → From JSON**. By
+  default it's `data/export.json` inside the app folder — see below to move it
+  somewhere others can reach.
 
 In Power Query, pick the `bomLines`, `projects`, or `orders` table, choose
 **Into Table**, and expand the columns.
+
+### Sharing the data file with others
+
+To let teammates query the data without running the app, move the JSON file to
+a shared/network drive. The app stays `localhost`-only — only the file is
+shared.
+
+1. Copy `config.ini.example` to `config.ini` in the app folder (if you don't
+   already have a `config.ini`). Your `config.ini` is git-ignored, so your
+   personal path is never committed.
+2. In `config.ini`, under `[paths]`, uncomment `export_json` and set it to the
+   destination, e.g.
+
+   ```ini
+   [paths]
+   export_json = Z:\Shared\mBOM\bom-data.json
+   # or a UNC path:
+   # export_json = \\fileserver\engineering\mBOM\bom-data.json
+   ```
+
+3. Restart the app. The target folder is created if needed, and the file is
+   rewritten there on every change. The **Excel Data** dialog and the startup
+   log show the active path.
+
+Notes:
+
+- Absolute paths (including mapped drives and `\\server\share` UNC paths) are
+  used as-is; a relative path is taken relative to the app folder. Windows
+  backslashes work directly — don't double them.
+- For a one-off override without editing the file, set the `BOM_EXPORT_PATH`
+  environment variable; it takes precedence over `config.ini`.
+- Writing happens on a background thread, so a slow or briefly-unavailable
+  share never delays saves in the app; the file just catches up a moment later.
 
 ## Project structure
 
@@ -61,8 +96,9 @@ js/app.js          Home page logic
 js/project.js      Project detail + BOM logic (all four views, import/export, settings)
 js/store.js        Data layer — talks to server.py's API instead of localStorage
 server.py          Local server: serves the static files and a JSON API, backed by SQLite
+config.ini         Optional settings — e.g. relocate the Excel JSON file to a shared drive
 data/app.db         SQLite database (created on first run)
-data/export.json    Flat JSON snapshot for Excel, refreshed on every change
+data/export.json    Default location of the flat JSON snapshot for Excel (relocatable via config.ini)
 ```
 
 ## Notes

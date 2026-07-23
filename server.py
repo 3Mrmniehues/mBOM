@@ -10,18 +10,24 @@ CORS to worry about. The SQLite file is created (and seeded, on first run)
 at data/app.db next to this script.
 """
 
+import configparser
 import datetime
 import http.server
 import json
+import os
 import re
 import sqlite3
 import sys
+import tempfile
+import threading
+import time
 import traceback
 import urllib.parse
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / "data" / "app.db"
+CONFIG_PATH = BASE_DIR / "config.ini"
 PORT = 8791
 
 # ---------------------------------------------------------------------------
@@ -303,7 +309,55 @@ def build_tree(rows):
 
 
 ERROR_LOG = BASE_DIR / "server-error.log"
-EXPORT_JSON_PATH = BASE_DIR / "data" / "export.json"
+DEFAULT_EXPORT_PATH = BASE_DIR / "data" / "export.json"
+
+
+def log_problem(message):
+    """Report a server-side problem to the console, or to a log file when
+    running windowless (where sys.stderr is None)."""
+    line = message.rstrip("\n")
+    if sys.stderr is not None:
+        sys.stderr.write(line + "\n")
+        return
+    try:
+        with open(ERROR_LOG, "a", encoding="utf-8") as fh:
+            fh.write(line + "\n")
+    except OSError:
+        pass  # nothing else we can usefully do
+
+
+def resolve_export_path():
+    """Where the flat JSON snapshot is written. Kept configurable so the file
+    can live on a shared/network drive that other people query, rather than
+    inside the app folder. Precedence, first non-empty wins:
+
+      1. BOM_EXPORT_PATH environment variable (power-user override).
+      2. config.ini  ->  [paths] export_json = <path>
+      3. Default: data/export.json next to this script (backward compatible).
+
+    Relative paths resolve against the app folder; absolute paths — including
+    mapped drives (Z:\\...) and UNC shares (\\\\server\\share\\...) — are used
+    as-is. Any trouble reading config falls back to the default rather than
+    preventing the server from starting."""
+    raw = os.environ.get("BOM_EXPORT_PATH", "").strip()
+    if not raw and CONFIG_PATH.exists():
+        try:
+            parser = configparser.ConfigParser()
+            parser.read(CONFIG_PATH, encoding="utf-8")
+            raw = parser.get("paths", "export_json", fallback="").strip()
+        except (configparser.Error, OSError):
+            log_problem("Could not read config.ini; using the default export "
+                        "path:\n" + traceback.format_exc())
+            raw = ""
+    if not raw:
+        return DEFAULT_EXPORT_PATH
+    path = Path(raw).expanduser()
+    if not path.is_absolute():
+        path = (BASE_DIR / path).resolve()
+    return path
+
+
+EXPORT_JSON_PATH = resolve_export_path()
 
 
 # ---------------------------------------------------------------------------
@@ -431,38 +485,114 @@ def build_export_payload(conn, project_filter=None):
     }
 
 
+def _replace_with_retry(src, dst, attempts=5, delay=0.2):
+    """os.replace(src, dst), retried a few times. On Windows a reader that is
+    briefly holding the target open (e.g. Excel refreshing a query on a shared
+    drive) makes the replace fail with PermissionError; a short retry lets the
+    write land instead of being dropped."""
+    for attempt in range(attempts):
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError:
+            if attempt == attempts - 1:
+                raise
+            time.sleep(delay)
+
+
+def _atomic_write_json(path, payload):
+    """Write JSON to `path` via a unique temp file in the same directory, then
+    atomically rename it into place. Unique temp names (rather than a fixed
+    ".tmp") keep concurrent writers from colliding; same-directory rename keeps
+    the swap atomic even across a network share. Creates the parent directory
+    if missing, and never raises — a temporarily-unavailable share is logged,
+    not fatal."""
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp_name = tempfile.mkstemp(dir=str(path.parent),
+                                        prefix=path.name + ".", suffix=".tmp")
+        tmp = Path(tmp_name)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                json.dump(payload, fh, indent=2)
+            _replace_with_retry(tmp, path)
+        finally:
+            # If the rename succeeded, tmp is gone; otherwise clean it up.
+            if tmp.exists():
+                try:
+                    tmp.unlink()
+                except OSError:
+                    pass
+    except Exception:
+        log_problem("Failed to write export JSON to %s:\n%s"
+                    % (path, traceback.format_exc()))
+
+
 def write_export_file(conn=None):
-    """(Re)writes data/export.json. Called at startup and after every change,
-    so a file-based Excel connection always sees current data. Written to a
-    temp file and renamed so Excel never reads a half-written file."""
+    """(Re)writes the flat JSON snapshot at EXPORT_JSON_PATH so a file-based
+    Excel connection always sees current data. Reads the DB, then writes
+    atomically. Safe to call from any thread (opens its own connection when one
+    isn't supplied)."""
     own_conn = conn is None
     if own_conn:
         conn = get_connection()
     try:
         payload = build_export_payload(conn)
-        tmp = EXPORT_JSON_PATH.with_name(EXPORT_JSON_PATH.name + ".tmp")
-        with open(tmp, "w", encoding="utf-8") as fh:
-            json.dump(payload, fh, indent=2)
-        tmp.replace(EXPORT_JSON_PATH)
     except Exception:
-        log_problem("Failed to write export.json:\n" + traceback.format_exc())
+        log_problem("Failed to build export payload:\n" + traceback.format_exc())
+        return
     finally:
         if own_conn:
             conn.close()
+    _atomic_write_json(EXPORT_JSON_PATH, payload)
 
 
-def log_problem(message):
-    """Report a server-side problem to the console, or to a log file when
-    running windowless (where sys.stderr is None)."""
-    line = message.rstrip("\n")
-    if sys.stderr is not None:
-        sys.stderr.write(line + "\n")
-        return
-    try:
-        with open(ERROR_LOG, "a", encoding="utf-8") as fh:
-            fh.write(line + "\n")
-    except OSError:
-        pass  # nothing else we can usefully do
+# ---------------------------------------------------------------------------
+# Background, debounced export writer.
+#
+# Mutations mark the export "dirty" instead of writing the file inline, so a
+# slow or momentarily-unavailable shared drive never adds latency to — or
+# blocks — an API response. A single daemon thread coalesces a burst of edits
+# into one write, and is the only thread that writes the file, so writes are
+# naturally serialized.
+# ---------------------------------------------------------------------------
+
+_export_dirty = threading.Event()
+_export_stop = threading.Event()
+_EXPORT_DEBOUNCE_SECONDS = 0.75
+
+
+def mark_export_dirty():
+    """Request a (re)write of the export file soon. Cheap and non-blocking."""
+    _export_dirty.set()
+
+
+def _export_writer_loop():
+    while not _export_stop.is_set():
+        _export_dirty.wait()  # sleep until an edit (or shutdown) wakes us
+        if _export_stop.is_set():
+            break
+        # Let a burst of rapid edits settle, then write once. Clearing the
+        # flag *before* reading the DB means any edit that arrives during the
+        # write re-sets it and triggers a follow-up write with the newer data,
+        # so no change is ever lost (at worst one redundant write).
+        time.sleep(_EXPORT_DEBOUNCE_SECONDS)
+        _export_dirty.clear()
+        write_export_file()
+
+
+def start_export_writer():
+    thread = threading.Thread(target=_export_writer_loop, name="export-writer",
+                              daemon=True)
+    thread.start()
+    return thread
+
+
+def stop_export_writer():
+    """Stop the writer and flush one final time so the last edit isn't lost."""
+    _export_stop.set()
+    _export_dirty.set()  # wake the loop so it can notice the stop
+    write_export_file()
 
 
 # ---------------------------------------------------------------------------
@@ -586,7 +716,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                             (p["id"], p["wbs"], p["ewr"], p["name"], p["status"], p["dateCreated"]),
                         )
                     conn.commit()
-                    write_export_file(conn)
+                    mark_export_dirty()
                     return self._send_json(200, {"ok": True})
 
                 m = re.match(r"^/api/projects/([^/]+)$", path)
@@ -597,7 +727,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     conn.execute("DELETE FROM orders WHERE project_id=?", (project_id,))
                     conn.execute("DELETE FROM projects WHERE id=?", (project_id,))
                     conn.commit()
-                    write_export_file(conn)
+                    mark_export_dirty()
                     return self._send_json(200, {"ok": True})
 
                 m = re.match(r"^/api/bom/([^/]+)$", path)
@@ -615,7 +745,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     conn.execute("DELETE FROM bom_items WHERE project_id=?", (project_id,))
                     insert_tree(conn, project_id, tree, None)
                     conn.commit()
-                    write_export_file(conn)
+                    mark_export_dirty()
                     return self._send_json(200, {"ok": True})
 
                 m = re.match(r"^/api/orders/([^/]+)$", path)
@@ -652,7 +782,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                             ),
                         )
                     conn.commit()
-                    write_export_file(conn)
+                    mark_export_dirty()
                     return self._send_json(200, {"ok": True})
 
                 if path == "/api/status-options" and method == "GET":
@@ -665,7 +795,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     for i, v in enumerate(values):
                         conn.execute("INSERT INTO status_options (position, value) VALUES (?,?)", (i, v))
                     conn.commit()
-                    write_export_file(conn)
+                    mark_export_dirty()
                     return self._send_json(200, {"ok": True})
 
                 if path == "/api/custom-fields" and method == "GET":
@@ -687,7 +817,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                             (i, f["key"], f["label"], f["type"], json.dumps(f["options"]) if f.get("options") else None),
                         )
                     conn.commit()
-                    write_export_file(conn)
+                    mark_export_dirty()
                     return self._send_json(200, {"ok": True})
 
                 self._send_json(404, {"error": "Not found: " + method + " " + path})
@@ -724,16 +854,21 @@ def main():
         print("Open http://localhost:" + str(PORT) + " , or close the other server window and retry.")
         return 1
 
+    start_export_writer()
+
+    default_note = "" if EXPORT_JSON_PATH == DEFAULT_EXPORT_PATH else "  (relocated via config)"
     print("Serving " + str(BASE_DIR) + " at http://localhost:" + str(PORT))
     print("Database: " + str(DB_PATH))
     print("Excel data URL: http://localhost:" + str(PORT) + "/api/data.json")
-    print("Excel data file: " + str(EXPORT_JSON_PATH))
+    print("Excel data file: " + str(EXPORT_JSON_PATH) + default_note)
     print("Press Ctrl+C to stop.")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         print("\nShutting down.")
         server.shutdown()
+    finally:
+        stop_export_writer()  # final flush so the last edit isn't lost
     return 0
 
 
