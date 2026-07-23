@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Project Selector</title>
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+<div class="page">
+  <header class="page-header">
+    <div>
+      <h1>Select a Project</h1>
+      <p>Search, filter, and sort projects, then click one to open it.</p>
+    </div>
+    <div class="header-buttons">
+      <button type="button" class="secondary-btn" id="excelDataBtn">Excel Data</button>
+      <button type="button" class="new-project-btn" id="newProjectBtn">+ New Project</button>
+    </div>
+  </header>
+
+  <div class="toolbar">
+    <div class="field search-field">
+      <label for="searchInput">Search</label>
+      <input type="search" id="searchInput" placeholder="Search WBS, EWR, or project name...">
+    </div>
+    <div class="field">
+      <label for="statusFilter">Status</label>
+      <select id="statusFilter">
+        <option value="">All statuses</option>
+      </select>
+    </div>
+    <button type="button" class="clear-btn" id="clearFiltersBtn">Clear filters</button>
+  </div>
+
+  <p class="result-count" id="resultCount"></p>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th scope="col" data-key="wbs">WBS<span class="sort-indicator"></span></th>
+          <th scope="col" data-key="ewr">EWR<span class="sort-indicator"></span></th>
+          <th scope="col" data-key="name">Project Name<span class="sort-indicator"></span></th>
+          <th scope="col" data-key="status">Status<span class="sort-indicator"></span></th>
+          <th scope="col" data-key="dateCreated">Date Created<span class="sort-indicator"></span></th>
+          <th scope="col" class="actions-col">Actions</th>
+        </tr>
+      </thead>
+      <tbody id="projectTableBody">
+      </tbody>
+    </table>
+    <div class="empty-state" id="emptyState" hidden>No projects match your filters.</div>
+  </div>
+</div>
+
+<dialog id="newProjectDialog">
+  <form id="newProjectForm" novalidate>
+    <h2>New Project</h2>
+
+    <div class="form-field">
+      <label for="fieldWbs">WBS</label>
+      <input type="text" id="fieldWbs" name="wbs" required placeholder="e.g. 1.1.10">
+    </div>
+
+    <div class="form-field">
+      <label for="fieldEwr">EWR</label>
+      <input type="text" id="fieldEwr" name="ewr" required placeholder="e.g. EWR-2024-050">
+    </div>
+
+    <div class="form-field">
+      <label for="fieldName">Project Name</label>
+      <input type="text" id="fieldName" name="name" required placeholder="e.g. Substation Upgrade Phase 4">
+    </div>
+
+    <div class="form-field">
+      <label for="fieldStatus">Status</label>
+      <select id="fieldStatus" name="status" required>
+        <option value="Active">Active</option>
+        <option value="Archived">Archived</option>
+      </select>
+    </div>
+
+    <div class="form-field">
+      <label for="fieldDateCreated">Date Created</label>
+      <input type="date" id="fieldDateCreated" name="dateCreated" required>
+    </div>
+
+    <p class="form-error" id="formError" hidden></p>
+
+    <div class="form-actions">
+      <button type="button" class="cancel-btn" id="cancelNewProjectBtn">Cancel</button>
+      <button type="submit" class="submit-btn">Create Project</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="excelDataDialog">
+  <div class="excel-data-body">
+    <h2>Connect Excel to your data</h2>
+    <p class="excel-intro">
+      All projects, BOM lines, and orders are available as JSON in a flat,
+      spreadsheet-friendly shape. There are two ways to connect.
+    </p>
+
+    <section class="excel-option">
+      <h3>1. Live web connection (recommended)</h3>
+      <p>In Excel: <strong>Data &rarr; Get Data &rarr; From Other Sources &rarr; From Web</strong>,
+        paste this URL, then <strong>Refresh</strong> any time to pull the latest.</p>
+      <div class="copy-row">
+        <input type="text" id="excelUrl" readonly>
+        <button type="button" class="tool-btn" id="copyUrlBtn">Copy</button>
+      </div>
+    </section>
+
+    <section class="excel-option">
+      <h3>2. Local file</h3>
+      <p>A JSON file is kept in sync automatically — it's rewritten every time
+        you change anything. In Excel use <strong>Get Data &rarr; From File &rarr; From JSON</strong>
+        and point it at:</p>
+      <div class="copy-row">
+        <input type="text" id="excelFilePath" readonly>
+        <button type="button" class="tool-btn" id="copyPathBtn">Copy</button>
+      </div>
+      <p class="excel-note">Or grab a one-off snapshot now:</p>
+      <button type="button" class="tool-btn" id="downloadJsonBtn">Download JSON snapshot</button>
+    </section>
+
+    <p class="excel-tip">
+      In Power Query, choose the <strong>bomLines</strong>, <strong>projects</strong>,
+      or <strong>orders</strong> table, then <strong>Into Table</strong> and expand the columns.
+    </p>
+
+    <button type="button" class="settings-close" id="closeExcelDialogBtn">Close</button>
+  </div>
+</dialog>
+
+<dialog id="deleteProjectDialog">
+  <div class="delete-dialog-body">
+    <h2>Delete project?</h2>
+    <p class="delete-warning" id="deleteWarning"></p>
+    <p class="delete-subtle">
+      This permanently removes the project along with its entire Bill of
+      Materials and Orders. This can't be undone.
+    </p>
+    <p class="delete-subtle">Save a copy first?</p>
+    <button type="button" class="tool-btn" id="deleteExportBtn">Export to Excel</button>
+    <p class="import-result" id="deleteExportMsg" hidden></p>
+    <div class="delete-actions">
+      <button type="button" class="cancel-btn" id="deleteCancelBtn">Cancel</button>
+      <button type="button" class="danger-btn" id="deleteConfirmBtn">Delete project</button>
+    </div>
+  </div>
+</dialog>
+
+<script src="js/excel.js"></script>
+<script src="js/store.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

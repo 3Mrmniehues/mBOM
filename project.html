@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Project Detail</title>
+<link rel="stylesheet" href="css/styles.css">
+<link rel="stylesheet" href="css/project.css">
+</head>
+<body>
+<div class="page">
+  <a href="index.html" class="back-link">&larr; Back to Projects</a>
+
+  <div id="notFound" class="empty-state" hidden>
+    <p>Project not found.</p>
+  </div>
+
+  <div id="projectContent" hidden>
+    <div class="detail-header">
+      <div>
+        <h1 id="projectTitle">&nbsp;</h1>
+        <div class="meta" id="projectMeta"></div>
+      </div>
+      <div class="header-actions">
+        <span class="save-indicator" id="saveIndicator">Saved</span>
+        <button type="button" class="export-btn secondary" id="importExcelBtn">Import from Excel</button>
+        <button type="button" class="export-btn" id="exportExcelBtn">Export to Excel</button>
+      </div>
+    </div>
+
+    <div class="tabs">
+      <button type="button" class="tab-btn" data-tab="details">Project Details</button>
+      <button type="button" class="tab-btn active" data-tab="bom">Bill of Materials</button>
+      <button type="button" class="tab-btn" data-tab="orders">Orders</button>
+    </div>
+
+    <div class="tab-panel" id="tab-details">
+      <div class="details-card">
+        <form id="detailsForm" novalidate>
+          <div class="details-grid">
+            <div class="form-field">
+              <label for="detailWbs">WBS</label>
+              <input type="text" id="detailWbs" required>
+            </div>
+            <div class="form-field">
+              <label for="detailEwr">EWR</label>
+              <input type="text" id="detailEwr" required>
+            </div>
+            <div class="form-field full">
+              <label for="detailName">Project Name</label>
+              <input type="text" id="detailName" required>
+            </div>
+            <div class="form-field">
+              <label for="detailStatus">Status</label>
+              <select id="detailStatus" required>
+                <option value="Active">Active</option>
+                <option value="Archived">Archived</option>
+              </select>
+            </div>
+            <div class="form-field">
+              <label for="detailDateCreated">Date Created</label>
+              <input type="date" id="detailDateCreated" required>
+            </div>
+          </div>
+          <p class="form-error" id="detailsFormError" hidden></p>
+          <div class="details-actions">
+            <button type="submit" class="save-btn">Save Changes</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div class="tab-panel active" id="tab-bom">
+      <div class="bom-toolbar">
+        <div class="view-switch">
+          <button type="button" class="active" data-view="tree">Tree View</button>
+          <button type="button" data-view="flat">Flat View</button>
+          <button type="button" data-view="rfx">RFx View</button>
+        </div>
+        <input type="search" id="bomSearch" placeholder="Search BOM...">
+        <select class="add-col-select" id="groupFilterSelect">
+          <option value="">All</option>
+        </select>
+        <select class="add-col-select" id="poFilterSelect">
+          <option value="">All PO</option>
+        </select>
+        <div class="spacer"></div>
+        <button type="button" class="tool-btn" id="expandAllBtn">Expand All</button>
+        <button type="button" class="tool-btn" id="collapseAllBtn">Collapse All</button>
+        <button type="button" class="tool-btn" id="columnsBtn">Columns</button>
+        <select class="add-col-select" id="addColumnSelect">
+          <option value="">+ Add Column</option>
+        </select>
+        <button type="button" class="tool-btn" id="bomSettingsBtn">BOM Settings</button>
+        <button type="button" class="tool-btn primary" id="addRootItemBtn">+ Add Top-Level Item</button>
+      </div>
+
+      <div class="bom-table-wrap">
+        <table class="bom-grid" id="bomTable">
+          <colgroup id="bomColgroup"></colgroup>
+          <thead id="bomThead"></thead>
+          <tbody id="bomTbody"></tbody>
+        </table>
+      </div>
+      <div class="bom-empty" id="bomEmpty" hidden>No BOM items yet. Use "+ Add Top-Level Item" to start.</div>
+    </div>
+
+    <div class="tab-panel" id="tab-orders">
+      <div class="bom-toolbar">
+        <button type="button" class="tool-btn primary" id="addOrderBtn">+ Add Order</button>
+      </div>
+      <div class="bom-table-wrap">
+        <table class="bom-grid" id="ordersTable">
+          <colgroup>
+            <col style="width:130px"><col style="width:130px"><col style="width:220px">
+            <col style="width:160px"><col style="width:130px"><col style="width:130px">
+            <col style="width:70px">
+          </colgroup>
+          <thead id="ordersThead"></thead>
+          <tbody id="ordersTbody"></tbody>
+        </table>
+      </div>
+      <div class="bom-empty" id="ordersEmpty" hidden>No orders yet. Use "+ Add Order" to start.</div>
+      <p class="import-help">
+        These RFx and PO values populate the RFx and PO fields on the Bill of Materials tab —
+        a BOM line's PO is read from the order whose RFx it matches. Use an order's
+        <strong>Update Status</strong> action to push its status onto every BOM part on that RFx.
+      </p>
+    </div>
+  </div>
+</div>
+
+<dialog id="bomSettingsDialog">
+  <div class="settings-body">
+    <h2>BOM Settings</h2>
+
+    <div class="settings-section">
+      <h3>Status Options</h3>
+      <div class="chip-list" id="statusChipList"></div>
+      <div class="inline-add">
+        <input type="text" id="newStatusOption" placeholder="New status option">
+        <button type="button" id="addStatusOptionBtn">Add</button>
+      </div>
+    </div>
+
+    <div class="settings-section">
+      <h3>Custom Fields</h3>
+      <div id="customFieldList"></div>
+      <div class="inline-add">
+        <input type="text" id="newFieldName" placeholder="Field name">
+        <select id="newFieldType">
+          <option value="text">Text</option>
+          <option value="number">Number</option>
+          <option value="choice">Choice</option>
+        </select>
+        <button type="button" id="addFieldBtn">Add Field</button>
+      </div>
+      <input type="text" id="newFieldChoices" class="choices-input" placeholder="Choices, comma separated" hidden>
+      <p class="form-error" id="fieldFormError" hidden></p>
+    </div>
+
+    <button type="button" class="settings-close" id="closeSettingsBtn">Close</button>
+  </div>
+</dialog>
+
+<dialog id="importDialog">
+  <div class="settings-body">
+    <h2>Import BOM Items</h2>
+    <p class="import-help">
+      Rows are read from the <strong>Import</strong> sheet — the same sheet the Excel export
+      writes, so you can export a project, edit it, and load it straight back in. Fill in a row
+      per item and nest them by increasing the <strong>Level</strong> number (0 is top-level, 1
+      is a child of the row above, and so on). Any <strong>RFx</strong> in the sheet that isn't
+      on the Orders tab yet is added there automatically. A plain CSV with the same columns
+      works too.
+    </p>
+
+    <button type="button" class="tool-btn" id="downloadTemplateBtn">Download Template (Excel)</button>
+
+    <div class="settings-section import-upload-section">
+      <h3>Upload Filled-In File</h3>
+      <input type="file" id="importFileInput" accept=".xlsx,.csv">
+      <label class="import-replace-label">
+        <input type="checkbox" id="replaceExistingCheckbox">
+        Replace existing BOM items (clears current items first)
+      </label>
+      <p class="import-result" id="importResultMsg" hidden></p>
+      <div class="details-actions">
+        <button type="button" class="save-btn" id="runImportBtn" disabled>Import</button>
+      </div>
+    </div>
+
+    <button type="button" class="settings-close" id="closeImportBtn">Close</button>
+  </div>
+</dialog>
+
+<script src="js/store.js"></script>
+<script src="js/project.js"></script>
+</body>
+</html>
