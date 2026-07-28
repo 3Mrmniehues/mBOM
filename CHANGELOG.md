@@ -44,6 +44,12 @@ This log groups the work by area rather than by date.
 - **Row actions** consolidated into a 3-dots menu: Move Up/Down, Insert
   Above/Below, Add Sub-Item, Indent, Outdent, Delete. Larger expand/collapse
   handles.
+- **Focus on one assembly:** rows that are assemblies (have children) show a
+  3-dots menu next to their part number with **Filter to this assembly**, which
+  collapses the Tree view down to just that assembly and its sub-parts — hiding
+  every sibling and parent. Item numbers keep their true path (e.g. 1.7.1.1). A
+  banner names the focused assembly; clear it with its **Clear filter** button
+  or the **Esc** key.
 - **Data-quality flag:** lines sharing a 3M Part Number but with inconsistent
   Manufacturer, Commercial Part No, 3M Supplied, Description, RFx, or Status
   are highlighted, with an on-hover explanation of exactly what differs.

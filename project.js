@@ -107,6 +107,9 @@
   let currentView = "tree";
   const collapsed = new Set();
   let searchQuery = "";
+  // When set, Tree view shows only this assembly and its descendants
+  // (siblings/parents hidden). Cleared with the banner button or Esc.
+  let assemblyFilterGuid = null;
   const flatSortState = { key: "partNumber", dir: "asc" };
   const flatColumnFilters = {};
 
@@ -787,16 +790,58 @@
     renderBom();
   }
 
+  function filterToAssembly(guid) {
+    assemblyFilterGuid = guid;
+    collapsed.delete(guid); // make sure the focused assembly is expanded
+    renderBom();
+  }
+
+  function clearAssemblyFilter() {
+    if (!assemblyFilterGuid) return;
+    assemblyFilterGuid = null;
+    renderBom();
+  }
+
   const bomColgroup = document.getElementById("bomColgroup");
   const bomThead = document.getElementById("bomThead");
   const bomTbody = document.getElementById("bomTbody");
   const bomEmpty = document.getElementById("bomEmpty");
+  const assemblyFilterBanner = document.getElementById("assemblyFilterBanner");
+  const assemblyFilterLabel = document.getElementById("assemblyFilterLabel");
+
+  function updateAssemblyFilterBanner() {
+    if (!assemblyFilterBanner) return;
+    let show = false;
+    if (currentView === "tree" && assemblyFilterGuid) {
+      const ctx = findContext(assemblyFilterGuid);
+      if (ctx) {
+        const itemNo = computeItemNumbers(tree, "", new Map()).get(assemblyFilterGuid) || "";
+        const pn = (ctx.node.partNumber || "").trim() || "(no part number)";
+        const desc = (ctx.node.description || "").trim();
+        assemblyFilterLabel.textContent =
+          "Showing only assembly " + (itemNo ? itemNo + " · " : "") + pn + (desc ? " — " + desc : "");
+        show = true;
+      }
+    }
+    assemblyFilterBanner.hidden = !show;
+  }
 
   function renderTreeView() {
     const cols = getAllColumns().filter((c) => !hiddenTreeColumns.has(c.key));
 
+    // "Filter to this assembly": render only the chosen subtree. Item numbers
+    // still come from the full tree, so a focused node keeps its real path
+    // (e.g. 1.7.1.1); depth is re-based to 0 so the view isn't deeply indented.
+    let filterRoot = null;
+    if (assemblyFilterGuid) {
+      const ctx = findContext(assemblyFilterGuid);
+      if (ctx) filterRoot = ctx.node;
+      else assemblyFilterGuid = null; // node no longer exists — drop the filter
+    }
+    const renderRoots = filterRoot ? [filterRoot] : tree;
+
     const rows = [];
-    buildVisibleRows(tree, 0, rows);
+    buildVisibleRows(renderRoots, 0, rows);
     const itemNumbers = computeItemNumbers(tree, "", new Map());
     const parentMap = buildParentMap(tree, null);
     const conflicts = computePartNumberConflicts();
@@ -872,7 +917,24 @@
           }));
         } else {
           const td = renderEditableCell(node, c, tr);
-          if (c.key === "partNumber") td.classList.add("cell-part-number");
+          if (c.key === "partNumber") {
+            td.classList.add("cell-part-number");
+            // Assemblies (rows with children) get a 3-dots menu here to focus
+            // the tree on just this assembly and its parts.
+            if (hasChildren) {
+              td.classList.add("has-assembly-menu");
+              const asmBtn = el("button", {
+                type: "button", class: "assembly-menu-btn", title: "Assembly options", text: "⋮",
+              });
+              asmBtn.addEventListener("click", (e) => {
+                e.stopPropagation();
+                openPopupMenu(asmBtn, [
+                  { label: "Filter to this assembly", onClick: () => filterToAssembly(node.guid) },
+                ]);
+              });
+              td.appendChild(asmBtn);
+            }
+          }
           tr.appendChild(td);
         }
       });
@@ -1586,7 +1648,23 @@
     if (isTree) renderTreeView();
     else if (gv) renderGroupedView(gv);
     else renderFlatView();
+    updateAssemblyFilterBanner();
   }
+
+  if (assemblyFilterBanner) {
+    const clearBtn = document.getElementById("clearAssemblyFilterBtn");
+    if (clearBtn) clearBtn.addEventListener("click", clearAssemblyFilter);
+  }
+
+  // Esc clears the assembly filter — but only when nothing else is claiming
+  // Esc. Capture phase + running before the popup menu's own Esc handler
+  // means an open menu (or dialog) is left to handle its own Escape.
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    if (openMenu) return;
+    if (document.querySelector("dialog[open]")) return;
+    if (assemblyFilterGuid) clearAssemblyFilter();
+  }, true);
 
   viewSwitchButtons.forEach((btn) => {
     btn.addEventListener("click", () => {
