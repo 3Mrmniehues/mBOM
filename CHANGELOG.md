@@ -53,6 +53,31 @@ This log groups the work by area rather than by date.
 - **Data-quality flag:** lines sharing a 3M Part Number but with inconsistent
   Manufacturer, Commercial Part No, 3M Supplied, Description, RFx, or Status
   are highlighted, with an on-hover explanation of exactly what differs.
+- **Focus on one assembly:** assembly rows carry a 3-dots menu (next to the
+  part number) with **Filter to this assembly** — the Tree view collapses to
+  just that assembly and its sub-parts, hiding siblings and parents. Item
+  numbers keep their true path; clear with the banner button or **Esc**.
+- **Excel-like copy/paste:** in Tree view and the Parts List, drag or
+  shift-click to select a rectangle of cells, **Ctrl+C** to copy as
+  tab-separated values, and **Ctrl+V** to paste a block from the top-left of
+  the selection. Interoperates with real Excel. Read-only columns (Item No,
+  derived PO, inherited RFx/Status) are skipped on paste; pasting past the end
+  of the Parts List adds new rows.
+
+## Parts List
+
+- A fourth tab: a project-scoped **catalog of distinct parts** (Assy, 3M Part
+  Number, Qty, Spare, Manufacturer, Commercial Part No, 3M Supplied,
+  Description), searchable and editable, with the same Excel-like copy/paste
+  as the BOM.
+- **Stays in sync with the BOM automatically:** every BOM save adds or updates
+  the parts it uses (keyed by 3M Part Number); assemblies also remember a
+  snapshot of their child components. Parts added manually — or no longer in
+  the BOM — are kept, never deleted.
+- **Autocomplete on the BOM:** typing a 3M Part Number on a BOM line suggests
+  matching catalog parts; picking one fills in the line's identity fields. If
+  the part is an assembly, you're offered its remembered children as
+  ready-made sub-items.
 
 ## Orders
 
@@ -62,6 +87,9 @@ This log groups the work by area rather than by date.
   filtering affect the display only — the saved order sequence is unchanged.
 - **Update Status** action pushes an order's status onto every BOM part on
   that RFx.
+- **Renaming an RFx** on an order offers to carry every BOM line still on the
+  old RFx over to the new one (re-deriving their PO), so lines are never
+  silently orphaned.
 - RFx-view group headers show the order's description, supplier, delivery
   date, and status.
 
@@ -72,7 +100,9 @@ This log groups the work by area rather than by date.
   (grouped), and an Import sheet. Key columns are centered; column widths
   auto-fit. The BOM By RFx group headers spread each piece — RFx, PO,
   description, supplier, delivery date, status, and the part/qty roll-up —
-  across separate cells (not one merged cell).
+  across separate cells (not one merged cell). The **BOM (Flat)** and **BOM
+  (By RFx)** sheets ship with Excel column-filter dropdowns on their header
+  row.
 - **Import** reads real `.xlsx` files (handles Excel's compression) from the
   Import sheet; the template matches the export format; any new RFx values are
   added to the Orders table automatically.

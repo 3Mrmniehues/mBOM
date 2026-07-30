@@ -114,6 +114,14 @@ const Store = (function () {
     apiPut("/api/orders/" + encodeURIComponent(projectId), list);
   }
 
+  function getParts(projectId) {
+    return apiGet("/api/parts/" + encodeURIComponent(projectId));
+  }
+
+  function saveParts(projectId, list) {
+    apiPut("/api/parts/" + encodeURIComponent(projectId), list);
+  }
+
   return {
     makeId,
     getProjects,
@@ -130,5 +138,7 @@ const Store = (function () {
     saveCustomFields,
     getOrders,
     saveOrders,
+    getParts,
+    saveParts,
   };
 })();

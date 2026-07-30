@@ -104,6 +104,9 @@
   let statusOptions = Store.getStatusOptions();
   let customFields = Store.getCustomFields();
   let orders = Store.getOrders(project.id);
+  // Project-scoped parts catalog (Parts List tab). Kept in sync with the BOM
+  // by syncPartsFromBom() on every save; can also be edited manually.
+  let parts = Store.getParts(project.id);
   let currentView = "tree";
   const collapsed = new Set();
   let searchQuery = "";
@@ -333,8 +336,17 @@
     return map;
   }
 
-  function persistAndRender() {
+  // Single choke-point for persisting the BOM tree. Also refreshes the Parts
+  // List catalog from the tree (syncPartsFromBom) so the catalog stays current
+  // with every BOM change. Does NOT re-render the BOM — callers do that when
+  // they need to (e.g. persistAndRender).
+  function saveBomTree() {
+    syncPartsFromBom();
     Store.saveBom(project.id, tree);
+  }
+
+  function persistAndRender() {
+    saveBomTree();
     renderBom();
   }
 
@@ -409,7 +421,7 @@
         trEl.classList.toggle("assy-row", !!value);
       }
     }
-    Store.saveBom(project.id, tree);
+    saveBomTree();
   }
 
   function getSearchableValues(node) {
@@ -618,6 +630,130 @@
     return Array.from(set).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
   }
 
+  // ---------- Part-number autocomplete (sourced from the Parts List) ----------
+  // Typing a 3M Part Number on a BOM line suggests matching catalog parts.
+  // Picking one fills the line's identity fields; an assembly part can also
+  // drop in its remembered children as sub-items.
+  let openAutocomplete = null;
+
+  function closeAutocomplete() {
+    if (!openAutocomplete) return;
+    openAutocomplete.remove();
+    openAutocomplete = null;
+    document.removeEventListener("mousedown", onAutocompleteDocMouseDown, true);
+    document.removeEventListener("scroll", closeAutocomplete, true);
+  }
+
+  function onAutocompleteDocMouseDown(e) {
+    if (openAutocomplete && !openAutocomplete.contains(e.target) && e.target !== openAutocomplete._input) {
+      closeAutocomplete();
+    }
+  }
+
+  function matchParts(query) {
+    const q = query.trim().toLowerCase();
+    if (!q) return [];
+    const scored = [];
+    parts.forEach((p) => {
+      const pn = (p.partNumber || "").toLowerCase();
+      const desc = (p.description || "").toLowerCase();
+      if (!pn && !desc) return;
+      let score = -1;
+      if (pn && pn.startsWith(q)) score = 0;
+      else if (pn && pn.includes(q)) score = 1;
+      else if (desc.includes(q)) score = 2;
+      if (score >= 0) scored.push({ p: p, score: score });
+    });
+    scored.sort((a, b) => a.score - b.score || (a.p.partNumber || "").localeCompare(b.p.partNumber || ""));
+    return scored.slice(0, 8).map((s) => s.p);
+  }
+
+  function applyPartToNode(node, entry, trEl) {
+    node.partNumber = entry.partNumber || "";
+    node.manufacturer = entry.manufacturer || "";
+    node.commercialPartNo = entry.commercialPartNo || "";
+    node.supplied3M = !!entry.supplied3M;
+    node.description = entry.description || "";
+    node.qty = entry.qty || 0;
+    node.spare = entry.spare || 0;
+    node.assy = !!entry.assy;
+    if (entry.assy && entry.children && entry.children.length) {
+      const label = entry.partNumber || "This part";
+      const msg = label + " is an assembly with " + entry.children.length +
+        " component" + (entry.children.length === 1 ? "" : "s") + ". Add them as sub-items?";
+      if (window.confirm(msg)) {
+        node.children = (node.children || []).concat(entry.children.map(catalogChildToBomNode));
+        node.assy = true;
+        collapsed.delete(node.guid);
+      }
+    }
+    persistAndRender();
+  }
+
+  function setAutocompleteActive(box, i) {
+    if (box._active >= 0 && box._items[box._active]) box._items[box._active].el.classList.remove("active");
+    box._active = i;
+    if (i >= 0 && box._items[i]) box._items[i].el.classList.add("active");
+  }
+
+  function attachPartAutocomplete(input, node, trEl) {
+    input.setAttribute("autocomplete", "off");
+
+    function show(query) {
+      const matches = matchParts(query);
+      closeAutocomplete();
+      if (!matches.length) return;
+      const box = el("div", { class: "autocomplete-menu" });
+      box._input = input;
+      box._items = [];
+      box._active = -1;
+      matches.forEach((entry, i) => {
+        const item = el("div", { class: "autocomplete-item" }, [
+          el("span", { class: "ac-pn", text: entry.partNumber || "(no part number)" }),
+          el("span", { class: "ac-desc", text: entry.description || "" }),
+        ]);
+        if (entry.assy && entry.children && entry.children.length) {
+          item.appendChild(el("span", {
+            class: "ac-badge",
+            title: entry.children.length + " component" + (entry.children.length === 1 ? "" : "s"),
+            text: "⊞ " + entry.children.length,
+          }));
+        }
+        item.addEventListener("mousedown", (e) => {
+          e.preventDefault(); // keep focus off blur-commit; we handle the value
+          closeAutocomplete();
+          applyPartToNode(node, entry, trEl);
+        });
+        item.addEventListener("mousemove", () => setAutocompleteActive(box, i));
+        box.appendChild(item);
+        box._items.push({ entry: entry, el: item });
+      });
+      const r = input.getBoundingClientRect();
+      box.style.left = r.left + "px";
+      box.style.top = r.bottom + 2 + "px";
+      box.style.minWidth = r.width + "px";
+      document.body.appendChild(box);
+      openAutocomplete = box;
+      document.addEventListener("mousedown", onAutocompleteDocMouseDown, true);
+      document.addEventListener("scroll", closeAutocomplete, true);
+    }
+
+    input.addEventListener("input", () => show(input.value));
+    input.addEventListener("focus", () => { if (input.value.trim()) show(input.value); });
+    input.addEventListener("keydown", (e) => {
+      const box = openAutocomplete;
+      if (!box || box._input !== input) return;
+      if (e.key === "ArrowDown") { e.preventDefault(); setAutocompleteActive(box, Math.min(box._active + 1, box._items.length - 1)); }
+      else if (e.key === "ArrowUp") { e.preventDefault(); setAutocompleteActive(box, Math.max(box._active - 1, 0)); }
+      else if (e.key === "Enter" && box._active >= 0) {
+        e.preventDefault();
+        const entry = box._items[box._active].entry;
+        closeAutocomplete();
+        applyPartToNode(node, entry, trEl);
+      } else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); closeAutocomplete(); }
+    });
+  }
+
   function renderEditableCell(node, col, trEl) {
     const td = el("td");
     const rawValue = col.custom ? (node.custom ? node.custom[col.fieldKey] : undefined) : node[col.key];
@@ -656,7 +792,7 @@
         // may be inherited by "included in parent" descendants, so redraw.
         if (col.key === "rfx") {
           node.po = lookupPoForRfx(select.value);
-          Store.saveBom(project.id, tree);
+          saveBomTree();
         }
         if (col.key === "rfx" || col.key === "status") renderBom();
       });
@@ -680,6 +816,7 @@
       setNodeValue(node, col, input.value, trEl);
       if (isConflictField(col.key)) refreshConflictHighlights();
     });
+    if (col.key === "partNumber" && !col.custom) attachPartAutocomplete(input, node, trEl);
     td.appendChild(input);
     return td;
   }
@@ -881,7 +1018,7 @@
         ? "No BOM items yet. Use \"+ Add Top-Level Item\" to start."
         : "No items match your search.";
 
-    rows.forEach(({ node, depth }) => {
+    rows.forEach(({ node, depth }, ri) => {
       const tr = el("tr", { class: node.assy ? "assy-row" : "" });
       tr.dataset.guid = node.guid;
 
@@ -898,31 +1035,32 @@
       tr.appendChild(toggleTd);
 
       const info = resolveOrderInfo(node, parentMap);
-      cols.forEach((c) => {
+      cols.forEach((c, ci) => {
+        let cell;
         if (c.key === "itemNo") {
-          tr.appendChild(el("td", { class: "cell-computed", text: itemNumbers.get(node.guid) || "" }));
+          cell = el("td", { class: "cell-computed", text: itemNumbers.get(node.guid) || "" });
         } else if (c.key === "po") {
           // Always read-only: derived from the Orders row matching the RFx.
-          tr.appendChild(el("td", {
+          cell = el("td", {
             class: "cell-computed",
             text: info.po,
             title: info.po ? "From the Orders table (RFx " + info.rfx + ")" : "Set an RFx that has a PO on the Orders page",
-          }));
+          });
         } else if (info.inherited && (c.key === "rfx" || c.key === "status")) {
           // Included in Parent: this line rides on its parent's order.
-          tr.appendChild(el("td", {
+          cell = el("td", {
             class: "cell-computed cell-inherited",
             text: c.key === "rfx" ? info.rfx : info.status,
             title: "Inherited from parent assembly (Included in Parent)",
-          }));
+          });
         } else {
-          const td = renderEditableCell(node, c, tr);
+          cell = renderEditableCell(node, c, tr);
           if (c.key === "partNumber") {
-            td.classList.add("cell-part-number");
+            cell.classList.add("cell-part-number");
             // Assemblies (rows with children) get a 3-dots menu here to focus
             // the tree on just this assembly and its parts.
             if (hasChildren) {
-              td.classList.add("has-assembly-menu");
+              cell.classList.add("has-assembly-menu");
               const asmBtn = el("button", {
                 type: "button", class: "assembly-menu-btn", title: "Assembly options", text: "⋮",
               });
@@ -932,11 +1070,13 @@
                   { label: "Filter to this assembly", onClick: () => filterToAssembly(node.guid) },
                 ]);
               });
-              td.appendChild(asmBtn);
+              cell.appendChild(asmBtn);
             }
           }
-          tr.appendChild(td);
         }
+        cell.dataset.gridRow = ri;
+        cell.dataset.gridCol = ci;
+        tr.appendChild(cell);
       });
       tr.appendChild(renderActionsCell(node, depth));
 
@@ -1107,7 +1247,7 @@
     }
 
     sources.forEach((node) => applyValueToNode(node, col, newValue));
-    Store.saveBom(project.id, tree);
+    saveBomTree();
     renderBom();
   }
 
@@ -1407,7 +1547,7 @@
       n.rfx = newRfx;
       n.po = lookupPoForRfx(newRfx);
     });
-    Store.saveBom(project.id, tree);
+    saveBomTree();
     renderBom();
   }
 
@@ -2005,8 +2145,33 @@
     if (!window.confirm(msg)) return;
 
     matches.forEach((n) => { n.status = status; });
-    Store.saveBom(project.id, tree);
+    saveBomTree();
     renderBom();
+    flashSaveIndicator();
+  }
+
+  // Renaming an order's RFx would otherwise silently orphan every BOM line
+  // still pointing at the old value. Offer to carry those lines over to the
+  // new RFx (and re-derive their PO), mirroring reassignGroupRfx.
+  function propagateRfxChange(oldRfx, newRfx) {
+    const matches = [];
+    (function walk(nodes) {
+      nodes.forEach((n) => {
+        if (!n.includedInParent && (n.rfx || "").trim() === oldRfx) matches.push(n);
+        if (n.children && n.children.length) walk(n.children);
+      });
+    })(tree);
+    if (matches.length === 0) return;
+    const msg =
+      "This order's RFx changed from \"" + oldRfx + "\" to \"" + newRfx + "\".\n\n" +
+      "Update " + matches.length + " BOM part" + (matches.length === 1 ? "" : "s") +
+      " on RFx " + oldRfx + " to " + newRfx + "?";
+    if (!window.confirm(msg)) return;
+    matches.forEach((n) => {
+      n.rfx = newRfx;
+      n.po = lookupPoForRfx(newRfx);
+    });
+    saveBomTree();
     flashSaveIndicator();
   }
 
@@ -2014,8 +2179,15 @@
     const input = el("input", { class: "cell-input", type: "text" });
     input.value = order[field] || "";
     input.addEventListener("change", () => {
-      order[field] = input.value.trim();
+      const oldVal = (order[field] || "").trim();
+      const newVal = input.value.trim();
+      order[field] = newVal;
       saveOrders();
+      // Save the order first so lookupPoForRfx sees this order under its new
+      // RFx, then offer to move BOM lines from the old RFx to the new one.
+      if (field === "rfx" && oldVal && newVal && oldVal !== newVal) {
+        propagateRfxChange(oldVal, newVal);
+      }
       renderBom();
     });
     return el("td", {}, [input]);
@@ -2105,6 +2277,500 @@
     saveOrders();
     renderOrders();
   });
+
+  // ---------- Parts List ----------
+  // A project-scoped catalog of distinct parts (the 8 identity fields).
+  // Stays in sync with the BOM via syncPartsFromBom(), and doubles as the
+  // source for BOM part-number autocomplete. Assemblies remember a structural
+  // snapshot of their children so autocomplete can rebuild the hierarchy.
+  const partsThead = document.getElementById("partsThead");
+  const partsTbody = document.getElementById("partsTbody");
+  const partsEmpty = document.getElementById("partsEmpty");
+  const partsColgroup = document.getElementById("partsColgroup");
+  const addPartBtn = document.getElementById("addPartBtn");
+  const partsSearch = document.getElementById("partsSearch");
+  let partsSearchQuery = "";
+
+  const PARTS_COLUMNS = [
+    { key: "assy", label: "Assy", type: "checkbox" },
+    { key: "partNumber", label: "3M Part Number", type: "text" },
+    { key: "qty", label: "Qty", type: "number" },
+    { key: "spare", label: "Spare", type: "number" },
+    { key: "manufacturer", label: "Manufacturer", type: "text" },
+    { key: "commercialPartNo", label: "Commercial Part No", type: "text" },
+    { key: "supplied3M", label: "3M Supplied", type: "checkbox" },
+    { key: "description", label: "Description", type: "text" },
+  ];
+
+  function makeNewPart() {
+    return {
+      guid: Store.makeId(),
+      assy: false,
+      partNumber: "",
+      qty: 1,
+      spare: 0,
+      manufacturer: "",
+      commercialPartNo: "",
+      supplied3M: false,
+      description: "",
+      children: [],
+    };
+  }
+
+  function savePartsList() {
+    Store.saveParts(project.id, parts);
+    flashSaveIndicator();
+  }
+
+  // A structural, order-agnostic snapshot of an assembly's descendants: keeps
+  // identity fields (and nesting) but drops guid/rfx/po/status/notes so the
+  // snapshot is portable and stable to compare. Turned back into real BOM
+  // nodes by catalogChildToBomNode when autocomplete inserts an assembly.
+  function cloneChildrenForCatalog(children) {
+    return (children || []).map((c) => ({
+      assy: !!c.assy,
+      partNumber: (c.partNumber || "").trim(),
+      qty: c.qty || 0,
+      spare: c.spare || 0,
+      manufacturer: c.manufacturer || "",
+      commercialPartNo: c.commercialPartNo || "",
+      supplied3M: !!c.supplied3M,
+      description: c.description || "",
+      children: cloneChildrenForCatalog(c.children),
+    }));
+  }
+
+  function catalogChildToBomNode(snap) {
+    return {
+      guid: Store.makeId(),
+      assy: !!snap.assy,
+      includedInParent: false,
+      partNumber: snap.partNumber || "",
+      manufacturer: snap.manufacturer || "",
+      commercialPartNo: snap.commercialPartNo || "",
+      supplied3M: !!snap.supplied3M,
+      description: snap.description || "",
+      qty: snap.qty || 0,
+      spare: snap.spare || 0,
+      rfx: "",
+      po: "",
+      status: statusOptions[0] || "",
+      notes: "",
+      custom: {},
+      children: (snap.children || []).map(catalogChildToBomNode),
+    };
+  }
+
+  function catalogSnapshot(entry) {
+    return {
+      assy: !!entry.assy,
+      partNumber: entry.partNumber || "",
+      qty: entry.qty || 0,
+      spare: entry.spare || 0,
+      manufacturer: entry.manufacturer || "",
+      commercialPartNo: entry.commercialPartNo || "",
+      supplied3M: !!entry.supplied3M,
+      description: entry.description || "",
+      children: entry.children || [],
+    };
+  }
+
+  // Refresh the catalog from the BOM: for each distinct part number in the
+  // tree (first occurrence wins), add or update its catalog entry with the
+  // BOM's identity fields, capturing the child snapshot for assemblies. Never
+  // deletes — parts added manually (or no longer in the BOM) are kept.
+  function syncPartsFromBom() {
+    const firstByKey = new Map();
+    (function walk(nodes) {
+      nodes.forEach((n) => {
+        const pn = (n.partNumber || "").trim();
+        if (pn) {
+          const key = pn.toLowerCase();
+          if (!firstByKey.has(key)) firstByKey.set(key, n);
+        }
+        if (n.children && n.children.length) walk(n.children);
+      });
+    })(tree);
+
+    const existingByKey = new Map();
+    parts.forEach((p) => {
+      const key = (p.partNumber || "").trim().toLowerCase();
+      if (key && !existingByKey.has(key)) existingByKey.set(key, p);
+    });
+
+    let changed = false;
+    firstByKey.forEach((node, key) => {
+      let entry = existingByKey.get(key);
+      if (!entry) {
+        entry = makeNewPart();
+        parts.push(entry);
+        existingByKey.set(key, entry);
+        changed = true;
+      }
+      const before = JSON.stringify(catalogSnapshot(entry));
+      entry.assy = !!node.assy;
+      entry.partNumber = (node.partNumber || "").trim();
+      entry.qty = node.qty || 0;
+      entry.spare = node.spare || 0;
+      entry.manufacturer = node.manufacturer || "";
+      entry.commercialPartNo = node.commercialPartNo || "";
+      entry.supplied3M = !!node.supplied3M;
+      entry.description = node.description || "";
+      entry.children = node.assy && node.children && node.children.length
+        ? cloneChildrenForCatalog(node.children)
+        : [];
+      if (JSON.stringify(catalogSnapshot(entry)) !== before) changed = true;
+    });
+
+    if (changed) {
+      Store.saveParts(project.id, parts);
+      renderParts();
+    }
+  }
+
+  function getVisibleParts() {
+    const q = partsSearchQuery.trim().toLowerCase();
+    if (!q) return parts.slice();
+    return parts.filter((p) =>
+      [p.partNumber, p.description, p.manufacturer, p.commercialPartNo].some(
+        (v) => (v || "").toLowerCase().includes(q)
+      )
+    );
+  }
+
+  function partCell(part, col) {
+    if (col.type === "checkbox") {
+      const input = el("input", { type: "checkbox" });
+      input.checked = !!part[col.key];
+      input.addEventListener("change", () => {
+        part[col.key] = input.checked;
+        if (col.key === "assy") renderParts();
+        savePartsList();
+      });
+      return el("td", { class: "cell-checkbox" }, [input]);
+    }
+    if (col.type === "number") {
+      const input = el("input", { class: "cell-input narrow", type: "number" });
+      input.value = part[col.key] != null ? part[col.key] : "";
+      input.addEventListener("change", () => {
+        part[col.key] = Number(input.value) || 0;
+        savePartsList();
+      });
+      return el("td", {}, [input]);
+    }
+    const input = el("input", { class: "cell-input", type: "text" });
+    input.value = part[col.key] || "";
+    input.addEventListener("change", () => {
+      part[col.key] = input.value;
+      savePartsList();
+    });
+    const td = el("td", {}, [input]);
+    if (col.key === "partNumber" && part.assy && part.children && part.children.length) {
+      td.classList.add("cell-part-number", "has-parts-badge");
+      td.appendChild(
+        el("span", {
+          class: "parts-children-badge",
+          title: part.children.length + " remembered component" + (part.children.length === 1 ? "" : "s"),
+          text: "⊞ " + part.children.length,
+        })
+      );
+    }
+    return td;
+  }
+
+  function renderPartsHeader() {
+    partsThead.innerHTML = "";
+    const headRow = el("tr");
+    PARTS_COLUMNS.forEach((c) =>
+      headRow.appendChild(el("th", {}, [el("span", { class: "th-label", text: c.label })]))
+    );
+    headRow.appendChild(el("th", {}, [el("span", { class: "th-label", text: "Actions" })]));
+    partsThead.appendChild(headRow);
+  }
+
+  function renderParts() {
+    const colDefs = PARTS_COLUMNS.map((c) => ({ key: c.key, width: getDefaultColWidth(c) }));
+    colDefs.push({ key: "__actions__", width: 70 });
+    renderColgroup(partsColgroup, colDefs);
+
+    renderPartsHeader();
+    partsTbody.innerHTML = "";
+    partsEmpty.hidden = parts.length !== 0;
+
+    const visible = getVisibleParts();
+    if (parts.length && visible.length === 0) {
+      partsEmpty.hidden = false;
+      partsEmpty.textContent = "No parts match your search.";
+    } else if (parts.length === 0) {
+      partsEmpty.textContent =
+        "No parts yet. Parts appear here automatically as you build the BOM, or use \"+ Add Part\" to enter one manually.";
+    }
+
+    visible.forEach((part, ri) => {
+      const tr = el("tr", { class: part.assy ? "assy-row" : "" });
+      tr.dataset.guid = part.guid;
+      PARTS_COLUMNS.forEach((c, ci) => {
+        const cell = partCell(part, c);
+        cell.dataset.gridRow = ri;
+        cell.dataset.gridCol = ci;
+        tr.appendChild(cell);
+      });
+
+      const actionsTd = el("td", { class: "cell-actions" });
+      const menuBtn = el("button", { type: "button", class: "row-menu-btn", title: "Part actions", text: "⋮" });
+      menuBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        openPopupMenu(menuBtn, [
+          {
+            label: "Delete",
+            danger: true,
+            onClick: () => {
+              if (!window.confirm("Delete this part from the catalog?")) return;
+              const idx = parts.indexOf(part);
+              if (idx !== -1) parts.splice(idx, 1);
+              savePartsList();
+              renderParts();
+            },
+          },
+        ]);
+      });
+      actionsTd.appendChild(menuBtn);
+      tr.appendChild(actionsTd);
+      partsTbody.appendChild(tr);
+    });
+  }
+
+  addPartBtn.addEventListener("click", () => {
+    partsSearchQuery = "";
+    if (partsSearch) partsSearch.value = "";
+    parts.push(makeNewPart());
+    savePartsList();
+    renderParts();
+  });
+
+  if (partsSearch) {
+    partsSearch.addEventListener("input", () => {
+      partsSearchQuery = partsSearch.value;
+      renderParts();
+    });
+  }
+
+  // ---------- Excel-like range copy/paste (Tree view + Parts List) ----------
+  // A grid-clipboard engine bound to a tbody whose data cells are tagged with
+  // data-grid-row / data-grid-col during render. Click+drag or shift-click
+  // selects a rectangle; Ctrl+C copies it as TSV (interoperates with Excel);
+  // Ctrl+V pastes a TSV block from the top-left of the selection (or the
+  // active cell). Read-only cells are skipped on paste; the Parts List can
+  // grow new rows to fit the paste, the Tree cannot.
+  function coerceCellValue(col, raw) {
+    const s = raw == null ? "" : String(raw).trim();
+    if (col.type === "checkbox") return ["x", "true", "1", "yes", "y"].indexOf(s.toLowerCase()) >= 0;
+    if (col.type === "number") {
+      if (s === "") return 0;
+      const n = Number(s);
+      return isFinite(n) ? n : 0;
+    }
+    return raw == null ? "" : String(raw);
+  }
+
+  function makeGridClipboard(opts) {
+    const tbody = opts.tbody;
+    const sel = { anchor: null, active: null, dragging: false };
+
+    function cellAt(r, c) {
+      return tbody.querySelector('td[data-grid-row="' + r + '"][data-grid-col="' + c + '"]');
+    }
+    function tdInfo(target) {
+      const td = target && target.closest ? target.closest("td[data-grid-row]") : null;
+      if (!td || !tbody.contains(td)) return null;
+      return { row: Number(td.dataset.gridRow), col: Number(td.dataset.gridCol) };
+    }
+    function clearPaint() {
+      tbody.querySelectorAll("td.cell-selected").forEach((td) => td.classList.remove("cell-selected"));
+    }
+    function rect() {
+      if (!sel.anchor || !sel.active) return null;
+      return {
+        r0: Math.min(sel.anchor.row, sel.active.row), r1: Math.max(sel.anchor.row, sel.active.row),
+        c0: Math.min(sel.anchor.col, sel.active.col), c1: Math.max(sel.anchor.col, sel.active.col),
+      };
+    }
+    function paint() {
+      clearPaint();
+      const b = rect();
+      if (!b) return;
+      for (let r = b.r0; r <= b.r1; r++) {
+        for (let c = b.c0; c <= b.c1; c++) {
+          const td = cellAt(r, c);
+          if (td) td.classList.add("cell-selected");
+        }
+      }
+    }
+    function isActiveGrid() {
+      return sel.active && tbody.offsetParent !== null;
+    }
+
+    tbody.addEventListener("mousedown", (e) => {
+      const info = tdInfo(e.target);
+      if (!info) return;
+      if (e.shiftKey) {
+        e.preventDefault();
+        if (!sel.anchor) sel.anchor = { row: info.row, col: info.col };
+        sel.active = { row: info.row, col: info.col };
+        paint();
+        return;
+      }
+      // Plain click: set the active cell but let the input focus for editing;
+      // no range highlight for a single cell (clicking deselects any range).
+      sel.anchor = { row: info.row, col: info.col };
+      sel.active = { row: info.row, col: info.col };
+      clearPaint();
+      sel.dragging = true;
+    });
+
+    document.addEventListener("mousemove", (e) => {
+      if (!sel.dragging) return;
+      const info = tdInfo(e.target);
+      if (!info) return;
+      if (info.row !== sel.active.row || info.col !== sel.active.col) {
+        sel.active = { row: info.row, col: info.col };
+        if (window.getSelection) window.getSelection().removeAllRanges();
+        paint();
+      }
+    });
+    document.addEventListener("mouseup", () => { sel.dragging = false; });
+
+    document.addEventListener("copy", (e) => {
+      if (!isActiveGrid()) return;
+      if (!tbody.querySelector("td.cell-selected")) return; // single cell → normal input copy
+      const b = rect();
+      const cols = opts.columns();
+      const lines = [];
+      for (let r = b.r0; r <= b.r1; r++) {
+        const rowObj = opts.rowObjectAt(r);
+        const vals = [];
+        for (let c = b.c0; c <= b.c1; c++) {
+          const col = cols[c];
+          const v = rowObj && col ? col.get(rowObj) : "";
+          vals.push(v == null ? "" : String(v));
+        }
+        lines.push(vals.join("\t"));
+      }
+      e.clipboardData.setData("text/plain", lines.join("\n"));
+      e.preventDefault();
+    });
+
+    document.addEventListener("paste", (e) => {
+      if (!isActiveGrid()) return;
+      const text = e.clipboardData ? e.clipboardData.getData("text/plain") : "";
+      if (text == null || text === "") return;
+      const cleaned = text.replace(/\r\n?/g, "\n").replace(/\n$/, "");
+      const hasBlock = cleaned.indexOf("\t") >= 0 || cleaned.indexOf("\n") >= 0;
+      const painted = !!tbody.querySelector("td.cell-selected");
+      if (!hasBlock && !painted) return; // single value into a focused input → normal paste
+      e.preventDefault();
+      const matrix = cleaned.split("\n").map((line) => line.split("\t"));
+      const b = rect();
+      const startRow = painted && b ? b.r0 : sel.active.row;
+      const startCol = painted && b ? b.c0 : sel.active.col;
+      const cols = opts.columns();
+      const rowObjs = opts.resolvePasteRows(startRow, matrix.length);
+      let touched = false;
+      matrix.forEach((line, dr) => {
+        const rowObj = rowObjs[dr];
+        if (!rowObj) return;
+        line.forEach((raw, dc) => {
+          const col = cols[startCol + dc];
+          if (!col || col.readOnly(rowObj)) return;
+          col.set(rowObj, raw);
+          touched = true;
+        });
+      });
+      if (touched) opts.commit();
+    });
+  }
+
+  function treeGridConfig() {
+    return {
+      tbody: bomTbody,
+      columns: function () {
+        const cols = getAllColumns().filter((c) => !hiddenTreeColumns.has(c.key));
+        const parentMap = buildParentMap(tree, null);
+        const itemNumbers = computeItemNumbers(tree, "", new Map());
+        return cols.map((c) => ({
+          type: c.type,
+          readOnly: function (node) {
+            if (c.type === "computed" || c.type === "derived-po") return true;
+            if ((c.key === "rfx" || c.key === "status") && resolveOrderInfo(node, parentMap).inherited) return true;
+            return false;
+          },
+          get: function (node) {
+            if (c.key === "itemNo") return itemNumbers.get(node.guid) || "";
+            if (c.key === "po") return resolveOrderInfo(node, parentMap).po;
+            if (c.key === "rfx") return resolveOrderInfo(node, parentMap).rfx;
+            if (c.key === "status") return resolveOrderInfo(node, parentMap).status;
+            const v = c.custom ? (node.custom ? node.custom[c.fieldKey] : "") : node[c.key];
+            if (c.type === "checkbox") return v ? "X" : "";
+            return v == null ? "" : v;
+          },
+          set: function (node, raw) {
+            applyValueToNode(node, c, coerceCellValue(c, raw));
+          },
+        }));
+      },
+      rowObjectAt: function (r) {
+        const tr = bomTbody.children[r];
+        if (!tr || !tr.dataset.guid) return null;
+        const ctx = findContext(tr.dataset.guid);
+        return ctx ? ctx.node : null;
+      },
+      resolvePasteRows: function (startRow, n) {
+        const out = [];
+        for (let i = 0; i < n; i++) out.push(this.rowObjectAt(startRow + i)); // tree never grows
+        return out;
+      },
+      commit: function () { persistAndRender(); },
+    };
+  }
+
+  function partsGridConfig() {
+    return {
+      tbody: partsTbody,
+      columns: function () {
+        return PARTS_COLUMNS.map((c) => ({
+          type: c.type,
+          readOnly: function () { return false; },
+          get: function (part) {
+            const v = part[c.key];
+            if (c.type === "checkbox") return v ? "X" : "";
+            return v == null ? "" : v;
+          },
+          set: function (part, raw) { part[c.key] = coerceCellValue(c, raw); },
+        }));
+      },
+      rowObjectAt: function (r) {
+        const tr = partsTbody.children[r];
+        if (!tr || !tr.dataset.guid) return null;
+        return parts.find((p) => p.guid === tr.dataset.guid) || null;
+      },
+      resolvePasteRows: function (startRow, n) {
+        const visibleGuids = Array.from(partsTbody.children).map((tr) => tr.dataset.guid);
+        const out = [];
+        for (let i = 0; i < n; i++) {
+          const idx = startRow + i;
+          if (idx < visibleGuids.length) {
+            out.push(parts.find((p) => p.guid === visibleGuids[idx]) || null);
+          } else {
+            const np = makeNewPart();
+            parts.push(np);
+            out.push(np);
+          }
+        }
+        return out;
+      },
+      commit: function () { savePartsList(); renderParts(); },
+    };
+  }
 
   // ---------- Export to Excel ----------
   // Produces a genuine .xlsx (Office Open XML) workbook: a small hand-rolled
@@ -2239,6 +2905,7 @@
   function buildFlatSheet() {
     const cols = getExportAggregateColumns(FLAT_EXCLUDED_KEYS);
     const sheet = makeSheet("BOM (Flat)");
+    sheet.autoFilter = true; // header-row filter dropdowns
     addRow(sheet, cols.map((c) => ({ value: c.label, style: "header", center: isCenteredCol(c) })));
 
     const aggregated = aggregateByPartNumber(collectFlatNodes(tree));
@@ -2276,6 +2943,7 @@
     const cols = getExportAggregateColumns(viewState.excludedKeys);
     const sheet = makeSheet(sheetName);
     sheet.grouped = true; // emit Excel outline grouping (see sheetToXml)
+    sheet.autoFilter = true; // header-row filter dropdowns
     addRow(sheet, cols.map((c) => ({ value: c.label, style: "header", center: isCenteredCol(c) })));
 
     const nodes = collectFlatNodes(tree);
@@ -2437,12 +3105,20 @@
     // rows, so Excel puts the +/- outline button on the header.
     const sheetPrXml = sheet.grouped ? '<sheetPr><outlinePr summaryBelow="0"/></sheetPr>' : "";
 
+    // Column-filter dropdowns over the header row (row 1) down to the last row.
+    // Must sit after <sheetData> and before <mergeCells> per the schema.
+    const autoFilterXml =
+      sheet.autoFilter && sheet.rows.length
+        ? '<autoFilter ref="A1:' + colLetter(widths.length - 1) + sheet.rows.length + '"/>'
+        : "";
+
     return (
       '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
       '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
       sheetPrXml +
       "<cols>" + colsXml + "</cols>" +
       "<sheetData>" + rowsXml + "</sheetData>" +
+      autoFilterXml +
       mergesXml +
       "</worksheet>"
     );
@@ -2992,7 +3668,7 @@
     const importedRoots = buildTreeFromLeveledRows(leveledRows);
     if (replace) tree.length = 0;
     importedRoots.forEach((n) => tree.push(n));
-    Store.saveBom(project.id, tree);
+    saveBomTree();
 
     const addedOrders = syncOrdersFromImport(leveledRows.map((r) => r.node));
 
@@ -3116,4 +3792,11 @@
   populateDetailsForm();
   renderBom();
   renderOrders();
+  renderParts();
+  makeGridClipboard(treeGridConfig());
+  makeGridClipboard(partsGridConfig());
+  // Bootstrap the catalog from an existing BOM the first time only (the list
+  // is empty, so there's nothing manual to overwrite). Afterward the catalog
+  // updates on every BOM save via saveBomTree → syncPartsFromBom.
+  if (parts.length === 0) syncPartsFromBom();
 })();

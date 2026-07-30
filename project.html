@@ -32,6 +32,7 @@
       <button type="button" class="tab-btn" data-tab="details">Project Details</button>
       <button type="button" class="tab-btn active" data-tab="bom">Bill of Materials</button>
       <button type="button" class="tab-btn" data-tab="orders">Orders</button>
+      <button type="button" class="tab-btn" data-tab="parts">Parts List</button>
     </div>
 
     <div class="tab-panel" id="tab-details">
@@ -130,6 +131,28 @@
         These RFx and PO values populate the RFx and PO fields on the Bill of Materials tab —
         a BOM line's PO is read from the order whose RFx it matches. Use an order's
         <strong>Update Status</strong> action to push its status onto every BOM part on that RFx.
+      </p>
+    </div>
+
+    <div class="tab-panel" id="tab-parts">
+      <div class="bom-toolbar">
+        <input type="search" id="partsSearch" placeholder="Search parts...">
+        <div class="spacer"></div>
+        <button type="button" class="tool-btn primary" id="addPartBtn">+ Add Part</button>
+      </div>
+      <div class="bom-table-wrap">
+        <table class="bom-grid" id="partsTable">
+          <colgroup id="partsColgroup"></colgroup>
+          <thead id="partsThead"></thead>
+          <tbody id="partsTbody"></tbody>
+        </table>
+      </div>
+      <div class="bom-empty" id="partsEmpty" hidden>No parts yet. Parts appear here automatically as you build the BOM, or use "+ Add Part" to enter one manually.</div>
+      <p class="import-help">
+        This catalog stays in sync with the Bill of Materials — every part you use there is
+        added here automatically. Parts you add manually are kept even if they're not in the
+        BOM. When you type a 3M Part Number on the BOM tab, matches from this list are
+        suggested for autocomplete; assemblies also remember their child components.
       </p>
     </div>
   </div>

@@ -240,6 +240,7 @@ window.Excel = (function () {
   function buildFlatSheet(data) {
     const cols = getExportAggregateColumns(data.customFields, FLAT_EXCLUDED_KEYS);
     const sheet = makeSheet("BOM (Flat)");
+    sheet.autoFilter = true; // header-row filter dropdowns
     addRow(sheet, cols.map((c) => ({ value: c.label, style: "header", center: isCenteredCol(c) })));
     const aggregated = aggregateByPartNumber(collectFlatNodes(data.tree, data.orders));
     aggregated.sort((a, b) => a.partNumber.localeCompare(b.partNumber));
@@ -253,6 +254,7 @@ window.Excel = (function () {
     const cols = getExportAggregateColumns(data.customFields, RFX_VIEW.excludedKeys);
     const sheet = makeSheet("BOM (By RFx)");
     sheet.grouped = true;
+    sheet.autoFilter = true; // header-row filter dropdowns
     addRow(sheet, cols.map((c) => ({ value: c.label, style: "header", center: isCenteredCol(c) })));
 
     const nodes = collectFlatNodes(data.tree, data.orders);
@@ -379,11 +381,17 @@ window.Excel = (function () {
         merges.map((m) => '<mergeCell ref="' + m + '"/>').join("") + "</mergeCells>"
       : "";
     const sheetPrXml = sheet.grouped ? '<sheetPr><outlinePr summaryBelow="0"/></sheetPr>' : "";
+    // Column-filter dropdowns over the header row down to the last row. Must
+    // sit after <sheetData> and before <mergeCells> per the schema.
+    const autoFilterXml =
+      sheet.autoFilter && sheet.rows.length
+        ? '<autoFilter ref="A1:' + colLetter(widths.length - 1) + sheet.rows.length + '"/>'
+        : "";
     return (
       '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
       '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
       sheetPrXml + "<cols>" + colsXml + "</cols>" +
-      "<sheetData>" + rowsXml + "</sheetData>" + mergesXml + "</worksheet>"
+      "<sheetData>" + rowsXml + "</sheetData>" + autoFilterXml + mergesXml + "</worksheet>"
     );
   }
 

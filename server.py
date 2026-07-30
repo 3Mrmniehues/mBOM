@@ -181,6 +181,22 @@ CREATE TABLE IF NOT EXISTS orders (
     status TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_orders_project ON orders (project_id);
+
+CREATE TABLE IF NOT EXISTS parts_list (
+    guid TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    position INTEGER NOT NULL,
+    assy INTEGER NOT NULL DEFAULT 0,
+    part_number TEXT NOT NULL DEFAULT '',
+    qty REAL NOT NULL DEFAULT 0,
+    spare REAL NOT NULL DEFAULT 0,
+    manufacturer TEXT NOT NULL DEFAULT '',
+    commercial_part_no TEXT NOT NULL DEFAULT '',
+    supplied_3m INTEGER NOT NULL DEFAULT 0,
+    description TEXT NOT NULL DEFAULT '',
+    children_json TEXT NOT NULL DEFAULT '[]'
+);
+CREATE INDEX IF NOT EXISTS idx_parts_project ON parts_list (project_id);
 """
 
 
@@ -722,9 +738,10 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 m = re.match(r"^/api/projects/([^/]+)$", path)
                 if m and method == "DELETE":
                     project_id = urllib.parse.unquote(m.group(1))
-                    # Cascade: a project owns its BOM lines and orders.
+                    # Cascade: a project owns its BOM lines, orders, and parts list.
                     conn.execute("DELETE FROM bom_items WHERE project_id=?", (project_id,))
                     conn.execute("DELETE FROM orders WHERE project_id=?", (project_id,))
+                    conn.execute("DELETE FROM parts_list WHERE project_id=?", (project_id,))
                     conn.execute("DELETE FROM projects WHERE id=?", (project_id,))
                     conn.commit()
                     mark_export_dirty()
@@ -779,6 +796,50 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                                 o["guid"], project_id, i, o.get("rfx", ""), o.get("po", ""),
                                 o.get("description", ""), o.get("supplierName", ""),
                                 o.get("deliveryDate", ""), o.get("status", ""),
+                            ),
+                        )
+                    conn.commit()
+                    mark_export_dirty()
+                    return self._send_json(200, {"ok": True})
+
+                m = re.match(r"^/api/parts/([^/]+)$", path)
+                if m and method == "GET":
+                    project_id = urllib.parse.unquote(m.group(1))
+                    rows = conn.execute(
+                        """SELECT guid, assy, part_number, qty, spare, manufacturer,
+                                  commercial_part_no, supplied_3m, description, children_json
+                           FROM parts_list WHERE project_id=? ORDER BY position""",
+                        (project_id,),
+                    ).fetchall()
+                    return self._send_json(200, [
+                        {
+                            "guid": r["guid"], "assy": bool(r["assy"]),
+                            "partNumber": r["part_number"], "qty": r["qty"], "spare": r["spare"],
+                            "manufacturer": r["manufacturer"], "commercialPartNo": r["commercial_part_no"],
+                            "supplied3M": bool(r["supplied_3m"]), "description": r["description"],
+                            "children": json.loads(r["children_json"] or "[]"),
+                        }
+                        for r in rows
+                    ])
+
+                if m and method == "PUT":
+                    project_id = urllib.parse.unquote(m.group(1))
+                    parts = body or []
+                    conn.execute("DELETE FROM parts_list WHERE project_id=?", (project_id,))
+                    for i, p in enumerate(parts):
+                        conn.execute(
+                            """INSERT INTO parts_list
+                               (guid, project_id, position, assy, part_number, qty, spare,
+                                manufacturer, commercial_part_no, supplied_3m, description, children_json)
+                               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                            (
+                                p["guid"], project_id, i,
+                                1 if p.get("assy") else 0,
+                                p.get("partNumber", ""), p.get("qty", 0) or 0, p.get("spare", 0) or 0,
+                                p.get("manufacturer", ""), p.get("commercialPartNo", ""),
+                                1 if p.get("supplied3M") else 0,
+                                p.get("description", ""),
+                                json.dumps(p.get("children") or []),
                             ),
                         )
                     conn.commit()
