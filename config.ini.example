@@ -9,8 +9,9 @@
 #
 # To make the data easy for other people to query, point export_json at a
 # shared/network location. The app writes a flat, spreadsheet-friendly JSON
-# snapshot there after every change; others open it from Excel (Power Query)
-# or their own scripts. The app server itself still runs only on this machine
+# snapshot there when it starts and stops (restart to refresh it); others open
+# it from Excel (Power Query) or their own scripts. The app server itself still
+# runs only on this machine
 # (http://localhost:8791) - only the file is shared.
 #
 # Notes:

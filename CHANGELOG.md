@@ -26,14 +26,21 @@ This log groups the work by area rather than by date.
 
 - **Views:** Tree (hierarchical, editable), Flat (aggregated by part number),
   and RFx (grouped). A PO view existed briefly and was then removed in favor
-  of a PO filter on the RFx view.
+  of a PO filter on the RFx view. The RFx view shows **Status** and **Notes**
+  by default (removable via each column's "×", re-addable via "+ Add Column").
+  The Tree and RFx views open **fully collapsed** by default; use **Expand All**
+  (or a row's toggle) to drill in.
 - **Editing in every view:** inline cells in Tree view; and editing in
   Flat/RFx views, where a change fans out to every underlying line — with a
   confirm popup and a difference summary whenever more than one line is
   affected. RFx is editable from the RFx group headers (reassigns the whole
-  group).
+  group), which also carry a **Clear Notes** button that wipes the Notes field
+  on every part on that RFx (after a confirmation).
 - **Columns:** resizable, sortable, per-column filters; a show/hide columns
   menu; and "+ Add Column" to pull tree fields into the Flat/RFx views.
+- **Custom columns start hidden** in every BOM view so they don't clutter the
+  default layout — show them in Tree view via the Columns menu, or in Flat/RFx
+  via "+ Add Column".
 - **Fields:** Item No (auto-computed from tree position), Assy, Included in
   Parent, 3M Part Number, Qty, Spare (rolled into quantity totals),
   Manufacturer, Commercial Part No, 3M Supplied, Description, RFx, PO
@@ -41,9 +48,14 @@ This log groups the work by area rather than by date.
   custom fields.
 - **Included in Parent** makes RFx/PO/Status read-only and inherited from the
   parent assembly.
-- **Row actions** consolidated into a 3-dots menu: Move Up/Down, Insert
-  Above/Below, Add Sub-Item, Indent, Outdent, Delete. Larger expand/collapse
-  handles.
+- **Row actions** consolidated into a 3-dots menu: Move Up/Down, **Move
+  before…/after…**, Insert Above/Below, Add Sub-Item, Indent, Outdent, Delete.
+  Larger expand/collapse handles.
+- **Move before/after a chosen part:** instead of nudging a line one row at a
+  time, pick **Move before…** or **Move after…** and choose the target part
+  from a type-to-search list (item no · 3M part number · description). The line
+  (with its sub-items) relocates next to that part — anywhere in the tree, so it
+  can change nesting too. A part can't be moved into its own sub-tree.
 - **Focus on one assembly:** rows that are assemblies (have children) show a
   3-dots menu next to their part number with **Filter to this assembly**, which
   collapses the Tree view down to just that assembly and its sub-parts — hiding
@@ -57,6 +69,10 @@ This log groups the work by area rather than by date.
   part number) with **Filter to this assembly** — the Tree view collapses to
   just that assembly and its sub-parts, hiding siblings and parents. Item
   numbers keep their true path; clear with the banner button or **Esc**.
+- **Level color-coding:** Tree view rows are shaded by their depth in the
+  hierarchy (the same palette as the Excel export), so the structure reads at a
+  glance. The tint adapts to light/dark theme, and the data-quality warning
+  still takes precedence on flagged rows.
 - **Excel-like copy/paste:** in Tree view and the Parts List, drag or
   shift-click to select a rectangle of cells, **Ctrl+C** to copy as
   tab-separated values, and **Ctrl+V** to paste a block from the top-left of
@@ -82,6 +98,8 @@ This log groups the work by area rather than by date.
 ## Orders
 
 - Full Orders tab: RFx, PO, Description, Supplier Name, Delivery Date, Status.
+- **Add Order** opens a form to enter all the order's details up front (RFx is
+  required), rather than dropping a blank row into the table.
 - **Sort and filter** the Orders table: click a column header to sort
   (ascending/descending), and use the per-column dropdown filters. Sorting and
   filtering affect the display only — the saved order sequence is unchanged.
@@ -97,7 +115,11 @@ This log groups the work by area rather than by date.
 
 - **Export** to a real `.xlsx` with sheets: Project Details (including a Date
   Exported row), BOM Tree (with Excel outline grouping), BOM Flat, BOM By RFx
-  (grouped), and an Import sheet. Key columns are centered; column widths
+  (grouped), and an Import sheet.
+- **Level color-coding:** the BOM Tree sheet shades each row by its depth in
+  the hierarchy (a 6-color palette; deeper levels reuse the last color), so the
+  structure reads at a glance. A matching color key is added to the Project
+  Details sheet. The Import sheet is left uncolored so it still round-trips. Key columns are centered; column widths
   auto-fit. The BOM By RFx group headers spread each piece — RFx, PO,
   description, supplier, delivery date, status, and the part/qty roll-up —
   across separate cells (not one merged cell). The **BOM (Flat)** and **BOM
@@ -112,17 +134,19 @@ This log groups the work by area rather than by date.
 - Data moved from browser storage to a **SQLite database** (`data/app.db`) via
   `server.py`, so clearing the browser no longer affects data.
 - **Excel data connection:** a live endpoint (`/api/data.json`, for Power
-  Query "From Web") and an auto-maintained JSON file that rewrites on every
-  change. Both expose flat, spreadsheet-friendly `projects` / `orders` /
-  `bomLines` tables. Discoverable via the Excel Data dialog.
+  Query "From Web", always current) and a JSON file written when the app
+  **starts** and **stops** — not on every edit, so ongoing work never touches
+  the (possibly shared) file. Both expose flat, spreadsheet-friendly `projects`
+  / `orders` / `bomLines` tables. Discoverable via the Excel Data dialog; to
+  refresh the file mid-session, restart the app.
 - **Shareable data file:** the JSON file can be relocated out of the app folder
   onto a shared/network drive so others can query it, by setting `export_json`
   in `config.ini` (or the `BOM_EXPORT_PATH` environment variable); it defaults
   to `data/export.json`. The server stays `localhost`-only — only the file is
   shared. Writes are hardened (auto-created target folder, unique temp file +
-  atomic rename, retry when the file is briefly locked) and moved to a
-  background thread, so a slow or unavailable share never delays or blocks saves
-  in the app.
+  atomic rename, retry when the file is briefly locked). To make the on-stop
+  write reliable for the windowless server, `stop-app.bat` triggers a graceful
+  shutdown (`POST /api/shutdown`) and only force-kills as a fallback.
 
 ## Running the app / infrastructure
 

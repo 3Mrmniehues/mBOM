@@ -222,6 +222,66 @@
   </div>
 </dialog>
 
+<dialog id="moveDialog">
+  <div class="settings-body">
+    <h2>Move part</h2>
+    <p class="move-subject" id="moveDialogSubject"></p>
+
+    <div class="move-position" role="radiogroup" aria-label="Position">
+      <label><input type="radio" name="movePosition" value="before"> Before</label>
+      <label><input type="radio" name="movePosition" value="after"> After</label>
+    </div>
+
+    <input type="search" id="moveSearch" class="move-search" placeholder="Search parts by item no, 3M part number, or description…">
+    <div class="move-candidate-list" id="moveCandidateList"></div>
+    <p class="move-empty" id="moveEmpty" hidden>No matching parts.</p>
+
+    <div class="details-actions">
+      <button type="button" class="tool-btn" id="moveCancelBtn">Cancel</button>
+      <button type="button" class="save-btn" id="moveConfirmBtn" disabled>Move</button>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="orderDialog">
+  <div class="settings-body">
+    <h2>Add Order</h2>
+    <form id="orderForm" novalidate>
+      <div class="details-grid">
+        <div class="form-field">
+          <label for="orderRfx">RFx</label>
+          <input type="text" id="orderRfx" required>
+        </div>
+        <div class="form-field">
+          <label for="orderPo">PO</label>
+          <input type="text" id="orderPo">
+        </div>
+        <div class="form-field full">
+          <label for="orderDescription">Description</label>
+          <input type="text" id="orderDescription">
+        </div>
+        <div class="form-field">
+          <label for="orderSupplier">Supplier Name</label>
+          <input type="text" id="orderSupplier">
+        </div>
+        <div class="form-field">
+          <label for="orderDelivery">Delivery Date</label>
+          <input type="date" id="orderDelivery">
+        </div>
+        <div class="form-field full">
+          <label for="orderStatus">Status</label>
+          <select id="orderStatus"></select>
+        </div>
+      </div>
+      <p class="form-error" id="orderFormError" hidden></p>
+      <div class="details-actions">
+        <button type="button" class="tool-btn" id="orderCancelBtn">Cancel</button>
+        <button type="submit" class="save-btn" id="orderSubmitBtn">Add Order</button>
+      </div>
+    </form>
+  </div>
+</dialog>
+
 <script src="js/store.js"></script>
 <script src="js/project.js"></script>
 </body>

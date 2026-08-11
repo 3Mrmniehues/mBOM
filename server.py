@@ -564,51 +564,18 @@ def write_export_file(conn=None):
 
 
 # ---------------------------------------------------------------------------
-# Background, debounced export writer.
+# Export snapshot lifecycle.
 #
-# Mutations mark the export "dirty" instead of writing the file inline, so a
-# slow or momentarily-unavailable shared drive never adds latency to — or
-# blocks — an API response. A single daemon thread coalesces a burst of edits
-# into one write, and is the only thread that writes the file, so writes are
-# naturally serialized.
+# The flat JSON snapshot (for a file-based Excel connection) is written only
+# when the app starts and when it stops — deliberately NOT on every edit — so
+# ongoing work never touches the (possibly shared/network) file. main() writes
+# it once at start and once on the way down; the POST /api/shutdown route lets
+# stop-app.bat trigger a graceful stop so that final write actually runs (a
+# forced kill can't run it). To refresh it mid-session, restart the app.
 # ---------------------------------------------------------------------------
 
-_export_dirty = threading.Event()
-_export_stop = threading.Event()
-_EXPORT_DEBOUNCE_SECONDS = 0.75
-
-
-def mark_export_dirty():
-    """Request a (re)write of the export file soon. Cheap and non-blocking."""
-    _export_dirty.set()
-
-
-def _export_writer_loop():
-    while not _export_stop.is_set():
-        _export_dirty.wait()  # sleep until an edit (or shutdown) wakes us
-        if _export_stop.is_set():
-            break
-        # Let a burst of rapid edits settle, then write once. Clearing the
-        # flag *before* reading the DB means any edit that arrives during the
-        # write re-sets it and triggers a follow-up write with the newer data,
-        # so no change is ever lost (at worst one redundant write).
-        time.sleep(_EXPORT_DEBOUNCE_SECONDS)
-        _export_dirty.clear()
-        write_export_file()
-
-
-def start_export_writer():
-    thread = threading.Thread(target=_export_writer_loop, name="export-writer",
-                              daemon=True)
-    thread.start()
-    return thread
-
-
-def stop_export_writer():
-    """Stop the writer and flush one final time so the last edit isn't lost."""
-    _export_stop.set()
-    _export_dirty.set()  # wake the loop so it can notice the stop
-    write_export_file()
+# Set in main() once the server exists, so the /api/shutdown route can stop it.
+_httpd = None
 
 
 # ---------------------------------------------------------------------------
@@ -705,6 +672,15 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         # body would be parsed as the start of the next request, so this must
         # happen even on routes that end up 404ing.
         body = self._read_json_body() if method in ("PUT", "POST") else None
+
+        if path == "/api/shutdown" and method == "POST":
+            # Graceful stop so the export snapshot is written on the way down
+            # (see main's finally). shutdown() must run off this request thread
+            # or it deadlocks waiting for this very request to finish.
+            if _httpd is not None:
+                threading.Thread(target=_httpd.shutdown, daemon=True).start()
+            return self._send_json(200, {"ok": True, "stopping": True})
+
         try:
             conn = get_connection()
             try:
@@ -732,7 +708,6 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                             (p["id"], p["wbs"], p["ewr"], p["name"], p["status"], p["dateCreated"]),
                         )
                     conn.commit()
-                    mark_export_dirty()
                     return self._send_json(200, {"ok": True})
 
                 m = re.match(r"^/api/projects/([^/]+)$", path)
@@ -744,7 +719,6 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     conn.execute("DELETE FROM parts_list WHERE project_id=?", (project_id,))
                     conn.execute("DELETE FROM projects WHERE id=?", (project_id,))
                     conn.commit()
-                    mark_export_dirty()
                     return self._send_json(200, {"ok": True})
 
                 m = re.match(r"^/api/bom/([^/]+)$", path)
@@ -762,7 +736,6 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     conn.execute("DELETE FROM bom_items WHERE project_id=?", (project_id,))
                     insert_tree(conn, project_id, tree, None)
                     conn.commit()
-                    mark_export_dirty()
                     return self._send_json(200, {"ok": True})
 
                 m = re.match(r"^/api/orders/([^/]+)$", path)
@@ -799,7 +772,6 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                             ),
                         )
                     conn.commit()
-                    mark_export_dirty()
                     return self._send_json(200, {"ok": True})
 
                 m = re.match(r"^/api/parts/([^/]+)$", path)
@@ -843,7 +815,6 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                             ),
                         )
                     conn.commit()
-                    mark_export_dirty()
                     return self._send_json(200, {"ok": True})
 
                 if path == "/api/status-options" and method == "GET":
@@ -856,7 +827,6 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     for i, v in enumerate(values):
                         conn.execute("INSERT INTO status_options (position, value) VALUES (?,?)", (i, v))
                     conn.commit()
-                    mark_export_dirty()
                     return self._send_json(200, {"ok": True})
 
                 if path == "/api/custom-fields" and method == "GET":
@@ -878,7 +848,6 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                             (i, f["key"], f["label"], f["type"], json.dumps(f["options"]) if f.get("options") else None),
                         )
                     conn.commit()
-                    mark_export_dirty()
                     return self._send_json(200, {"ok": True})
 
                 self._send_json(404, {"error": "Not found: " + method + " " + path})
@@ -905,8 +874,9 @@ class Server(http.server.ThreadingHTTPServer):
 
 
 def main():
+    global _httpd
     init_db()
-    write_export_file()  # ensure data/export.json exists and is current at start
+    write_export_file()  # write the Excel/query JSON snapshot at start
     try:
         server = Server(("localhost", PORT), Handler)
     except OSError:
@@ -915,13 +885,14 @@ def main():
         print("Open http://localhost:" + str(PORT) + " , or close the other server window and retry.")
         return 1
 
-    start_export_writer()
+    _httpd = server  # let the /api/shutdown route stop us gracefully
 
     default_note = "" if EXPORT_JSON_PATH == DEFAULT_EXPORT_PATH else "  (relocated via config)"
     print("Serving " + str(BASE_DIR) + " at http://localhost:" + str(PORT))
     print("Database: " + str(DB_PATH))
     print("Excel data URL: http://localhost:" + str(PORT) + "/api/data.json")
     print("Excel data file: " + str(EXPORT_JSON_PATH) + default_note)
+    print("  (written at start and stop, not on every change)")
     print("Press Ctrl+C to stop.")
     try:
         server.serve_forever()
@@ -929,7 +900,7 @@ def main():
         print("\nShutting down.")
         server.shutdown()
     finally:
-        stop_export_writer()  # final flush so the last edit isn't lost
+        write_export_file()  # write the snapshot on the way out (start/stop only)
     return 0
 
 

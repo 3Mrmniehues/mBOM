@@ -45,10 +45,11 @@ details, or use either of these directly:
   **Refresh** in Excel any time to pull current data. Add `?project=<id>` to
   the URL to limit it to one project. (This only works on this machine, since
   the server is `localhost`-only.)
-- **Shared file:** a JSON file is rewritten automatically on every change, so
-  it's always current. In Excel use **Get Data → From File → From JSON**. By
-  default it's `data/export.json` inside the app folder — see below to move it
-  somewhere others can reach.
+- **Shared file:** a JSON snapshot is refreshed when the app **starts** and when
+  it **stops** — not on every edit — so restart the app to update it. In Excel
+  use **Get Data → From File → From JSON**. By default it's `data/export.json`
+  inside the app folder — see below to move it somewhere others can reach.
+  (For always-current data, use the live web connection above instead.)
 
 In Power Query, pick the `bomLines`, `projects`, or `orders` table, choose
 **Into Table**, and expand the columns.
@@ -73,8 +74,8 @@ shared.
    ```
 
 3. Restart the app. The target folder is created if needed, and the file is
-   rewritten there on every change. The **Excel Data** dialog and the startup
-   log show the active path.
+   written there when the app starts and stops. The **Excel Data** dialog and
+   the startup log show the active path.
 
 Notes:
 
@@ -83,8 +84,9 @@ Notes:
   backslashes work directly — don't double them.
 - For a one-off override without editing the file, set the `BOM_EXPORT_PATH`
   environment variable; it takes precedence over `config.ini`.
-- Writing happens on a background thread, so a slow or briefly-unavailable
-  share never delays saves in the app; the file just catches up a moment later.
+- The snapshot is written on start and on a graceful stop. `stop-app.bat` asks
+  the server to shut down cleanly (via `POST /api/shutdown`) so that final write
+  runs; a forced kill would skip it. To refresh mid-session, restart the app.
 
 ## Project structure
 
