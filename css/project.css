@@ -420,6 +420,114 @@ tr.filter-row td {
   border-color: var(--color-primary);
 }
 
+/* Multi-select filter control (button + dropdown) */
+.filter-select.filter-multi {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  cursor: pointer;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.filter-select.filter-multi:hover {
+  border-color: var(--color-primary);
+}
+
+.filter-multi .filter-multi-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.filter-multi .filter-caret {
+  flex-shrink: 0;
+  font-size: 0.6rem;
+  opacity: 0.7;
+}
+
+.filter-panel {
+  position: fixed;
+  z-index: 1100;
+  width: max-content;
+  max-width: 340px;
+  padding: 6px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+.filter-panel-header {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.filter-panel-search {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 5px;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font: inherit;
+  font-size: 0.82rem;
+}
+
+.filter-panel-links {
+  display: flex;
+  gap: 14px;
+}
+
+.filter-panel-link {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--color-primary);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.filter-panel-link:hover {
+  text-decoration: underline;
+}
+
+.filter-panel-list {
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.filter-panel-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 6px;
+  border-radius: 4px;
+  font-size: 0.83rem;
+  color: var(--color-text);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.filter-panel-item:hover {
+  background: var(--color-row-hover);
+}
+
+.filter-panel-item-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.filter-panel-empty {
+  padding: 8px 6px;
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+}
+
 table.bom-grid tbody td {
   padding: 3px 4px;
   border-bottom: 1px solid var(--color-border);
@@ -581,6 +689,121 @@ td.cell-part-number.has-assembly-menu .conflict-badge {
   display: none;
 }
 
+/* Bulk-action bar for selected BOM lines */
+.bom-selection-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding: 6px 12px;
+  border: 1px solid var(--color-primary);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--color-primary) 10%, var(--color-surface));
+}
+
+.bom-selection-bar[hidden] {
+  display: none;
+}
+
+.bom-selection-bar .spacer {
+  flex: 1;
+}
+
+#bomSelectionCount {
+  margin-right: 4px;
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+
+.tool-btn.danger {
+  color: var(--status-cancelled-fg);
+  border-color: color-mix(in srgb, var(--status-cancelled-fg) 40%, var(--color-border));
+}
+
+.tool-btn.danger:hover {
+  border-color: var(--status-cancelled-fg);
+}
+
+/* Selection checkbox column (Tree view) */
+th.cell-select-col,
+td.cell-select-col {
+  text-align: center;
+  padding: 0;
+}
+
+td.cell-select-col input[type="checkbox"],
+th.cell-select-col input[type="checkbox"] {
+  margin: 0;
+  cursor: pointer;
+}
+
+.bom-grid tbody tr.row-selected td.cell-select-col {
+  box-shadow: inset 3px 0 0 var(--color-primary);
+}
+
+/* RFx details info panel (B5) */
+.rfx-info-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+  padding: 6px 12px;
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-primary);
+  border-radius: 6px;
+  background: var(--color-surface);
+  font-size: 0.83rem;
+}
+
+.rfx-info-banner[hidden] {
+  display: none;
+}
+
+.rfx-info-banner .spacer {
+  flex: 1;
+}
+
+.rfx-info-content {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 16px;
+  min-width: 0;
+}
+
+.rfx-info-code {
+  font-weight: 700;
+  color: var(--color-primary);
+}
+
+.rfx-info-label {
+  color: var(--color-text-muted);
+}
+
+.rfx-info-muted {
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+.rfx-info-close {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.rfx-info-close:hover {
+  background: var(--color-row-hover);
+  color: var(--color-text);
+}
+
 .assembly-filter-banner #assemblyFilterLabel {
   flex: 1;
   font-weight: 600;
@@ -661,6 +884,131 @@ td.cell-checkbox input[type="checkbox"] {
 .tree-toggle.spacer {
   visibility: hidden;
   cursor: default;
+}
+
+/* Orders: expand a row to reveal the parts on its RFx */
+.order-rfx-inner {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.order-rfx-inner .cell-input {
+  flex: 1;
+  width: auto;
+  min-width: 0;
+}
+
+.order-expand-toggle {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-size: 0.85rem;
+  line-height: 1;
+}
+
+.order-expand-toggle:hover {
+  color: var(--color-text);
+  background: var(--color-row-hover);
+  border-color: var(--color-border);
+}
+
+.order-parts-row > td {
+  padding: 6px 12px 12px 34px;
+  background: var(--color-bg);
+}
+
+.order-parts-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+
+.order-parts-summary {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+
+.order-parts-table td .cell-input,
+.order-parts-table td .cell-select {
+  min-width: 90px;
+}
+
+.order-parts-table td:nth-child(6) .cell-select,
+.order-parts-table td:nth-child(7) .cell-select {
+  min-width: 110px;
+}
+
+.order-parts-table td:nth-child(8) .cell-input {
+  min-width: 160px;
+}
+
+.order-parts-empty {
+  font-size: 0.82rem;
+  font-style: italic;
+  color: var(--color-text-muted);
+}
+
+.order-parts-table {
+  border-collapse: collapse;
+  width: 100%;
+  max-width: 960px;
+}
+
+.order-parts-table th,
+.order-parts-table td {
+  padding: 4px 10px;
+  text-align: left;
+  border-bottom: 1px solid var(--color-border);
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+.order-parts-table th {
+  color: var(--color-text-muted);
+  font-weight: 600;
+}
+
+.order-parts-table td.op-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.order-parts-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+/* Transient confirmation toast (e.g. "Copied N rows to clipboard") */
+.app-toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  z-index: 2000;
+  padding: 9px 16px;
+  border-radius: 8px;
+  background: var(--color-text);
+  color: var(--color-surface);
+  font-size: 0.85rem;
+  font-weight: 600;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-50%) translateY(10px);
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+.app-toast.show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
 }
 
 .row-actions {
@@ -867,7 +1215,8 @@ td.cell-selected .cell-select {
 /* Settings dialog */
 dialog#bomSettingsDialog,
 dialog#moveDialog,
-dialog#orderDialog {
+dialog#orderDialog,
+dialog#insertRowsDialog {
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
   padding: 0;
@@ -878,7 +1227,8 @@ dialog#orderDialog {
 
 dialog#bomSettingsDialog::backdrop,
 dialog#moveDialog::backdrop,
-dialog#orderDialog::backdrop {
+dialog#orderDialog::backdrop,
+dialog#insertRowsDialog::backdrop {
   background: rgba(0, 0, 0, 0.45);
 }
 

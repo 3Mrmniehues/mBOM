@@ -24,6 +24,7 @@
       <div class="header-actions">
         <span class="save-indicator" id="saveIndicator">Saved</span>
         <button type="button" class="export-btn secondary" id="importExcelBtn">Import from Excel</button>
+        <button type="button" class="export-btn secondary" id="exportHtmlBtn" title="Save a self-contained, read-only HTML snapshot of this project">Export HTML</button>
         <button type="button" class="export-btn" id="exportExcelBtn">Export to Excel</button>
       </div>
     </div>
@@ -76,7 +77,6 @@
         <div class="view-switch">
           <button type="button" class="active" data-view="tree">Tree View</button>
           <button type="button" data-view="flat">Flat View</button>
-          <button type="button" data-view="rfx">RFx View</button>
         </div>
         <input type="search" id="bomSearch" placeholder="Search BOM...">
         <select class="add-col-select" id="groupFilterSelect">
@@ -86,9 +86,11 @@
           <option value="">All PO</option>
         </select>
         <div class="spacer"></div>
+        <button type="button" class="tool-btn" id="copyBomBtn" title="Copy the visible table to the clipboard (paste into Excel)">Copy Table</button>
         <button type="button" class="tool-btn" id="expandAllBtn">Expand All</button>
         <button type="button" class="tool-btn" id="collapseAllBtn">Collapse All</button>
         <button type="button" class="tool-btn" id="columnsBtn">Columns</button>
+        <button type="button" class="tool-btn" id="showIncludedBtn" title="Show or hide lines flagged &quot;Included in Parent&quot;">Show Included-in-Parent</button>
         <select class="add-col-select" id="addColumnSelect">
           <option value="">+ Add Column</option>
         </select>
@@ -99,6 +101,22 @@
       <div class="assembly-filter-banner" id="assemblyFilterBanner" hidden>
         <span id="assemblyFilterLabel"></span>
         <button type="button" class="tool-btn" id="clearAssemblyFilterBtn">Clear filter (Esc)</button>
+      </div>
+
+      <div class="bom-selection-bar" id="bomSelectionBar" hidden>
+        <span id="bomSelectionCount"></span>
+        <button type="button" class="tool-btn" id="bulkSetStatusBtn">Set Status…</button>
+        <button type="button" class="tool-btn" id="bulkSetRfxBtn">Set RFx…</button>
+        <button type="button" class="tool-btn" id="bulkClearNotesBtn">Clear Notes</button>
+        <button type="button" class="tool-btn danger" id="bulkDeleteBtn">Delete</button>
+        <div class="spacer"></div>
+        <button type="button" class="tool-btn" id="bulkClearSelectionBtn">Clear selection</button>
+      </div>
+
+      <div class="rfx-info-banner" id="rfxInfoBanner" hidden>
+        <span class="rfx-info-content" id="rfxInfoContent"></span>
+        <div class="spacer"></div>
+        <button type="button" class="rfx-info-close" id="rfxInfoCloseBtn" title="Dismiss" aria-label="Dismiss">×</button>
       </div>
 
       <div class="bom-table-wrap">
@@ -114,6 +132,9 @@
     <div class="tab-panel" id="tab-orders">
       <div class="bom-toolbar">
         <button type="button" class="tool-btn primary" id="addOrderBtn">+ Add Order</button>
+        <div class="spacer"></div>
+        <button type="button" class="tool-btn" id="showIncludedOrdersBtn" title="Show or hide &quot;Included in Parent&quot; components in the expanded parts lists">Show Included-in-Parent</button>
+        <button type="button" class="tool-btn" id="copyOrdersBtn" title="Copy the visible table to the clipboard (paste into Excel)">Copy Table</button>
       </div>
       <div class="bom-table-wrap">
         <table class="bom-grid" id="ordersTable">
@@ -277,6 +298,22 @@
       <div class="details-actions">
         <button type="button" class="tool-btn" id="orderCancelBtn">Cancel</button>
         <button type="submit" class="save-btn" id="orderSubmitBtn">Add Order</button>
+      </div>
+    </form>
+  </div>
+</dialog>
+
+<dialog id="insertRowsDialog">
+  <div class="settings-body">
+    <h2>Insert Rows</h2>
+    <form id="insertRowsForm">
+      <div class="form-field">
+        <label for="insertRowsCount">How many blank rows to insert below this line?</label>
+        <input type="number" id="insertRowsCount" min="1" max="200" value="1">
+      </div>
+      <div class="details-actions">
+        <button type="button" class="tool-btn" id="insertRowsCancelBtn">Cancel</button>
+        <button type="submit" class="save-btn" id="insertRowsConfirmBtn">Insert</button>
       </div>
     </form>
   </div>

@@ -24,20 +24,23 @@ This log groups the work by area rather than by date.
 
 ## Bill of Materials
 
-- **Views:** Tree (hierarchical, editable), Flat (aggregated by part number),
-  and RFx (grouped). A PO view existed briefly and was then removed in favor
-  of a PO filter on the RFx view. The RFx view shows **Status** and **Notes**
-  by default (removable via each column's "×", re-addable via "+ Add Column").
-  The Tree and RFx views open **fully collapsed** by default; use **Expand All**
-  (or a row's toggle) to drill in.
-- **Editing in every view:** inline cells in Tree view; and editing in
-  Flat/RFx views, where a change fans out to every underlying line — with a
+- **Views:** Tree (hierarchical, editable) and Flat (aggregated by part
+  number). Grouping *by RFx* now lives on the **Orders** tab — expand an order
+  to view and edit its parts — so the earlier standalone PO and RFx BOM views
+  were both retired. The Tree view opens **fully collapsed** by default; use
+  **Expand All** (or a row's toggle) to drill in.
+- **Editing in the aggregated views:** in Flat view (and the Orders parts
+  expansion) a change to a part fans out to every underlying BOM line — with a
   confirm popup and a difference summary whenever more than one line is
-  affected. RFx is editable from the RFx group headers (reassigns the whole
-  group), which also carry a **Clear Notes** button that wipes the Notes field
-  on every part on that RFx (after a confirmation).
-- **Columns:** resizable, sortable, per-column filters; a show/hide columns
-  menu; and "+ Add Column" to pull tree fields into the Flat/RFx views.
+  affected.
+- **Columns:** resizable, sortable, **multi-select** per-column filters (pick
+  several values with OR matching, with a search box when the list is long and
+  a Clear for the whole column); a show/hide columns menu; and "+ Add Column"
+  to pull tree fields into the Flat view.
+- **Copy Table** (toolbar) copies the *visible* rows and columns — respecting
+  collapse, search, filters, and hidden columns — to the clipboard as
+  tab-separated text that pastes straight into Excel, with a confirmation
+  toast. Available in Tree and Flat views (and on the Orders tab).
 - **Custom columns start hidden** in every BOM view so they don't clutter the
   default layout — show them in Tree view via the Columns menu, or in Flat/RFx
   via "+ Add Column".
@@ -47,10 +50,18 @@ This log groups the work by area rather than by date.
   (read-only, derived from the RFx's order), Status, Notes, plus user-defined
   custom fields.
 - **Included in Parent** makes RFx/PO/Status read-only and inherited from the
-  parent assembly.
+  parent assembly. A **Show Included-in-Parent** toggle (Flat view toolbar, and
+  on the Orders tab) reveals those normally-hidden lines — in Flat view they
+  join the aggregation; in an expanded order they appear under their effective
+  (inherited) RFx. Toggling it off restores the hidden state.
 - **Row actions** consolidated into a 3-dots menu: Move Up/Down, **Move
-  before…/after…**, Insert Above/Below, Add Sub-Item, Indent, Outdent, Delete.
-  Larger expand/collapse handles.
+  before…/after…**, Insert Above/Below, **Insert Rows…** (a dialog asks how
+  many blank rows to drop in below the line), Add Sub-Item, Indent, Outdent,
+  Delete. Larger expand/collapse handles.
+- **Select lines + bulk actions:** a checkbox column (with a select-all header)
+  lets you pick any number of Tree-view lines; a bar then offers **Set Status**,
+  **Set RFx**, **Clear Notes**, and **Delete** on just the selected lines, plus
+  Clear selection. The selection is kept as you search, filter, and collapse.
 - **Move before/after a chosen part:** instead of nudging a line one row at a
   time, pick **Move before…** or **Move after…** and choose the target part
   from a type-to-search list (item no · 3M part number · description). The line
@@ -65,14 +76,20 @@ This log groups the work by area rather than by date.
 - **Data-quality flag:** lines sharing a 3M Part Number but with inconsistent
   Manufacturer, Commercial Part No, 3M Supplied, Description, RFx, or Status
   are highlighted, with an on-hover explanation of exactly what differs.
+- **RFx details, without the clutter:** in Tree view, hovering an RFx cell
+  shows a tooltip with its order details (PO, description, supplier, delivery,
+  status), and focusing/clicking one fills a dedicated info panel above the
+  table with the same details — so the rows stay clean. Works on inherited
+  (Included-in-Parent) RFx cells too.
 - **Focus on one assembly:** assembly rows carry a 3-dots menu (next to the
   part number) with **Filter to this assembly** — the Tree view collapses to
   just that assembly and its sub-parts, hiding siblings and parents. Item
   numbers keep their true path; clear with the banner button or **Esc**.
 - **Level color-coding:** Tree view rows are shaded by their depth in the
-  hierarchy (the same palette as the Excel export), so the structure reads at a
-  glance. The tint adapts to light/dark theme, and the data-quality warning
-  still takes precedence on flagged rows.
+  hierarchy with a **monochrome gradient** — darkest at the top level,
+  lightening as you go deeper (the same palette as the Excel export), so the
+  structure reads at a glance. The tint adapts to light/dark theme, and the
+  data-quality warning still takes precedence on flagged rows.
 - **Excel-like copy/paste:** in Tree view and the Parts List, drag or
   shift-click to select a rectangle of cells, **Ctrl+C** to copy as
   tab-separated values, and **Ctrl+V** to paste a block from the top-left of
@@ -100,16 +117,24 @@ This log groups the work by area rather than by date.
 - Full Orders tab: RFx, PO, Description, Supplier Name, Delivery Date, Status.
 - **Add Order** opens a form to enter all the order's details up front (RFx is
   required), rather than dropping a blank row into the table.
+- **Expand an order to see and edit its parts:** a toggle on each order row
+  reveals the BOM parts on that RFx (aggregated by 3M part number, with a
+  "N parts · Qty X" summary) inline, no page reload. **RFx**, **Status** and
+  **Notes** are editable there — a change fans out to every underlying BOM line
+  (with a confirm when more than one is affected) — and a **Clear Notes** button
+  wipes the Notes on every part on that RFx. Changing a part's **RFx moves it to
+  another order** (and re-derives its PO). This replaces the old RFx BOM view.
 - **Sort and filter** the Orders table: click a column header to sort
-  (ascending/descending), and use the per-column dropdown filters. Sorting and
-  filtering affect the display only — the saved order sequence is unchanged.
+  (ascending/descending), and use the per-column **multi-select** filters
+  (choose several values per column, OR-matched). Sorting and filtering affect
+  the display only — the saved order sequence is unchanged.
+- **Copy Table** copies the visible orders (headers + rows, excluding any
+  expanded parts) to the clipboard as tab-separated text for Excel.
 - **Update Status** action pushes an order's status onto every BOM part on
   that RFx.
 - **Renaming an RFx** on an order offers to carry every BOM line still on the
   old RFx over to the new one (re-deriving their PO), so lines are never
   silently orphaned.
-- RFx-view group headers show the order's description, supplier, delivery
-  date, and status.
 
 ## Excel import / export
 
@@ -117,7 +142,7 @@ This log groups the work by area rather than by date.
   Exported row), BOM Tree (with Excel outline grouping), BOM Flat, BOM By RFx
   (grouped), and an Import sheet.
 - **Level color-coding:** the BOM Tree sheet shades each row by its depth in
-  the hierarchy (a 6-color palette; deeper levels reuse the last color), so the
+  the hierarchy (a monochrome gradient, dark→light; deeper levels reuse the last color), so the
   structure reads at a glance. A matching color key is added to the Project
   Details sheet. The Import sheet is left uncolored so it still round-trips. Key columns are centered; column widths
   auto-fit. The BOM By RFx group headers spread each piece — RFx, PO,
@@ -128,6 +153,11 @@ This log groups the work by area rather than by date.
 - **Import** reads real `.xlsx` files (handles Excel's compression) from the
   Import sheet; the template matches the export format; any new RFx values are
   added to the Orders table automatically.
+- **Export HTML** saves a single self-contained, read-only `.html` snapshot of
+  the current project — Project Details, the full BOM Tree (depth-shaded, with
+  item numbers), the aggregated BOM Flat, and the Orders table. Inline styles,
+  no scripts, no external requests or database connection: it opens in any
+  browser and mirrors the current data exactly.
 
 ## Data storage & Excel connection
 
