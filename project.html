@@ -24,7 +24,7 @@
       <div class="header-actions">
         <span class="save-indicator" id="saveIndicator">Saved</span>
         <button type="button" class="export-btn secondary" id="importExcelBtn">Import from Excel</button>
-        <button type="button" class="export-btn secondary" id="exportHtmlBtn" title="Save a self-contained, read-only HTML snapshot of this project">Export HTML</button>
+        <button type="button" class="export-btn secondary" id="exportHtmlBtn" title="Save a self-contained, read-only copy of this project (Bill of Materials + Orders) that runs in any browser">Export HTML</button>
         <button type="button" class="export-btn" id="exportExcelBtn">Export to Excel</button>
       </div>
     </div>
@@ -133,6 +133,8 @@
       <div class="bom-toolbar">
         <button type="button" class="tool-btn primary" id="addOrderBtn">+ Add Order</button>
         <div class="spacer"></div>
+        <button type="button" class="tool-btn" id="expandAllOrdersBtn" title="Show every order's parts">Expand All</button>
+        <button type="button" class="tool-btn" id="collapseAllOrdersBtn" title="Hide every order's parts">Collapse All</button>
         <button type="button" class="tool-btn" id="showIncludedOrdersBtn" title="Show or hide &quot;Included in Parent&quot; components in the expanded parts lists">Show Included-in-Parent</button>
         <button type="button" class="tool-btn" id="copyOrdersBtn" title="Copy the visible table to the clipboard (paste into Excel)">Copy Table</button>
       </div>

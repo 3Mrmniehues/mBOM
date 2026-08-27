@@ -124,12 +124,16 @@ This log groups the work by area rather than by date.
   (with a confirm when more than one is affected) — and a **Clear Notes** button
   wipes the Notes on every part on that RFx. Changing a part's **RFx moves it to
   another order** (and re-derives its PO). This replaces the old RFx BOM view.
+  Toolbar **Expand All / Collapse All** buttons open or close every order's
+  parts at once.
 - **Sort and filter** the Orders table: click a column header to sort
   (ascending/descending), and use the per-column **multi-select** filters
   (choose several values per column, OR-matched). Sorting and filtering affect
   the display only — the saved order sequence is unchanged.
-- **Copy Table** copies the visible orders (headers + rows, excluding any
-  expanded parts) to the clipboard as tab-separated text for Excel.
+- **Copy Table** copies the visible orders to the clipboard as tab-separated
+  text for Excel — and now includes **each order's parts** (the same list the
+  expander shows), indented one column beneath their order, whether or not the
+  order is expanded.
 - **Update Status** action pushes an order's status onto every BOM part on
   that RFx.
 - **Renaming an RFx** on an order offers to carry every BOM line still on the
@@ -153,11 +157,14 @@ This log groups the work by area rather than by date.
 - **Import** reads real `.xlsx` files (handles Excel's compression) from the
   Import sheet; the template matches the export format; any new RFx values are
   added to the Orders table automatically.
-- **Export HTML** saves a single self-contained, read-only `.html` snapshot of
-  the current project — Project Details, the full BOM Tree (depth-shaded, with
-  item numbers), the aggregated BOM Flat, and the Orders table. Inline styles,
-  no scripts, no external requests or database connection: it opens in any
-  browser and mirrors the current data exactly.
+- **Export HTML** saves a single self-contained `.html` file that *is* the app,
+  running **read-only** against the project's data embedded in the page — no
+  server, database, or external requests, so it opens in any browser (even
+  straight off disk). It looks and behaves like the live app — Tree/Flat views,
+  search, column sort and multi-select filters, expand/collapse (BOM and
+  Orders), the RFx info panel, per-order parts expansion, and Copy Table all
+  work — but every cell is static text and the editing controls are gone. Only
+  the **Bill of Materials** and **Orders** tabs are included.
 
 ## Data storage & Excel connection
 

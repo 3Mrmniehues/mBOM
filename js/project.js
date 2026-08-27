@@ -16,8 +16,16 @@
     return node;
   }
 
+  // A read-only export bundles the project's data on the page and sets this
+  // flag; the app then renders every cell as static text and hides its editing
+  // controls, but all viewing features (tabs, views, search, filters, sort,
+  // expand/collapse, copy) keep working.
+  const READONLY = typeof window !== "undefined" && window.__MBOM_READONLY__ === true;
+  const embeddedData = (typeof window !== "undefined" && window.__MBOM_DATA__) || null;
+
   const params = new URLSearchParams(window.location.search);
-  const projectId = params.get("id");
+  const projectId =
+    params.get("id") || (embeddedData && embeddedData.project ? embeddedData.project.id : null);
   const project = projectId ? Store.getProjectById(projectId) : null;
 
   const notFound = document.getElementById("notFound");
@@ -28,6 +36,15 @@
     return;
   }
   projectContent.hidden = false;
+
+  if (READONLY) {
+    // Only the Bill of Materials and Orders tabs are exported; the rest are
+    // hidden by CSS. Drop the Orders table's trailing Actions column (fixed
+    // layout reserves its width otherwise).
+    document.body.classList.add("readonly");
+    const ordersActionsCol = document.querySelector("#ordersTable colgroup col:last-child");
+    if (ordersActionsCol) ordersActionsCol.remove();
+  }
 
   // ---------- Tabs ----------
   const tabButtons = document.querySelectorAll(".tab-btn");
@@ -67,6 +84,153 @@
     saveIndicator.classList.add("visible");
     clearTimeout(saveIndicatorTimer);
     saveIndicatorTimer = setTimeout(() => saveIndicator.classList.remove("visible"), 1800);
+  }
+
+  // ---------- Copy the visible table to the clipboard (TSV → Excel) ----------
+  let toastTimer = null;
+  function showToast(message) {
+    let toast = document.getElementById("appToast");
+    if (!toast) {
+      toast = el("div", { id: "appToast", class: "app-toast" });
+      document.body.appendChild(toast);
+    }
+    toast.textContent = message;
+    toast.classList.add("show");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toast.classList.remove("show"), 2200);
+  }
+
+  function fallbackCopy(text) {
+    const ta = el("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.left = "-9999px";
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand("copy"); } catch (e) { /* ignore */ }
+    document.body.removeChild(ta);
+  }
+
+  function writeClipboardText(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(text).catch(() => fallbackCopy(text));
+    }
+    fallbackCopy(text);
+    return Promise.resolve();
+  }
+
+  // The displayed value of a rendered cell: checkbox → X/blank, any input/select
+  // → its value, otherwise the plain text.
+  function tsvCellText(td) {
+    const cb = td.querySelector('input[type="checkbox"]');
+    if (cb) return cb.checked ? "X" : "";
+    const field = td.querySelector("input, select, textarea");
+    if (field) return field.value == null ? "" : String(field.value);
+    return td.textContent.replace(/[\t\r\n]+/g, " ").trim();
+  }
+
+  // Reads a rendered grid into TSV: the header row plus one line per visible
+  // data row. `.rows`/`.cells` are used (not descendant selectors) so nested
+  // tables — e.g. an expanded order's parts — are never picked up. Structural
+  // columns (leading toggle, trailing Actions) and flagged rows are skipped.
+  function gridToTsv(tableEl, opts) {
+    const skipLeading = opts.skipLeading || 0;
+    const skipTrailing = opts.skipTrailing || 0;
+    const skipRowClass = opts.skipRowClass || [];
+    const keep = (i, len) => i >= skipLeading && i < len - skipTrailing;
+
+    const lines = [];
+    const headerRow = tableEl.tHead ? tableEl.tHead.rows[0] : null;
+    if (headerRow) {
+      const ths = Array.from(headerRow.cells);
+      const headers = [];
+      ths.forEach((th, i) => {
+        if (!keep(i, ths.length)) return;
+        const label = th.querySelector(".th-label");
+        headers.push(((label ? label.textContent : th.textContent) || "").replace(/[▲▼]/g, "").trim());
+      });
+      lines.push(headers.join("\t"));
+    }
+
+    let dataRows = 0;
+    const tbody = tableEl.tBodies[0];
+    if (tbody) {
+      Array.from(tbody.rows).forEach((tr) => {
+        if (skipRowClass.some((c) => tr.classList.contains(c))) return;
+        const tds = Array.from(tr.cells);
+        const vals = [];
+        tds.forEach((td, i) => {
+          if (keep(i, tds.length)) vals.push(tsvCellText(td));
+        });
+        lines.push(vals.join("\t"));
+        dataRows += 1;
+      });
+    }
+    return { tsv: lines.join("\n"), rows: dataRows };
+  }
+
+  function copyGridToClipboard(tableEl, opts) {
+    if (!tableEl || !tableEl.tBodies[0] || tableEl.tBodies[0].rows.length === 0) {
+      showToast("Nothing to copy");
+      return;
+    }
+    const result = gridToTsv(tableEl, opts);
+    writeClipboardText(result.tsv).then(() =>
+      showToast("Copied " + result.rows + " row" + (result.rows === 1 ? "" : "s") + " to clipboard")
+    );
+  }
+
+  function tsvClean(v) {
+    return (v == null ? "" : String(v)).replace(/[\t\r\n]+/g, " ").trim();
+  }
+
+  // Orders TSV that also carries each order's parts (the expandable parts
+  // table), indented one column beneath their order. Uses the same visible
+  // (filtered/sorted) orders and the same part rule as the on-screen expansion,
+  // so it works whether or not an order is expanded.
+  function ordersWithPartsToTsv() {
+    const lines = [ORDER_COLUMNS.map((c) => c.label).join("\t")];
+    const partsHeader = ["", "3M Part Number", "Description", "Qty", "Manufacturer", "Commercial Part No", "RFx", "Status", "Notes"];
+    const visible = getVisibleOrders();
+    visible.forEach((order) => {
+      lines.push(ORDER_COLUMNS.map((c) => tsvClean(order[c.key])).join("\t"));
+      const parts = orderParts(order);
+      if (parts.length) {
+        lines.push(partsHeader.join("\t"));
+        parts.forEach((p) => {
+          lines.push(
+            ["", p.partNumber, p.description, p.totalQty, p.manufacturer, p.commercialPartNo, p.rfx, p.status, p.notes]
+              .map(tsvClean)
+              .join("\t")
+          );
+        });
+      }
+    });
+    return { tsv: lines.join("\n"), orders: visible.length };
+  }
+
+  const copyBomBtn = document.getElementById("copyBomBtn");
+  const copyOrdersBtn = document.getElementById("copyOrdersBtn");
+  if (copyBomBtn) {
+    copyBomBtn.addEventListener("click", () => {
+      // Tree view: skip the leading select + toggle columns and the trailing
+      // Actions column (a read-only export omits select + actions). Flat view
+      // is all data columns.
+      const opts =
+        currentView === "tree"
+          ? { skipLeading: READONLY ? 1 : 2, skipTrailing: READONLY ? 0 : 1 }
+          : {};
+      copyGridToClipboard(document.getElementById("bomTable"), opts);
+    });
+  }
+  if (copyOrdersBtn) {
+    copyOrdersBtn.addEventListener("click", () => {
+      if (orders.length === 0) { showToast("Nothing to copy"); return; }
+      const result = ordersWithPartsToTsv();
+      writeClipboardText(result.tsv).then(() =>
+        showToast("Copied " + result.orders + " order" + (result.orders === 1 ? "" : "s") + " (with parts) to clipboard")
+      );
+    });
   }
 
   detailsForm.addEventListener("submit", (e) => {
@@ -109,6 +273,13 @@
   let parts = Store.getParts(project.id);
   let currentView = "tree";
   const collapsed = new Set();
+  // Tree View line selection (session-scoped, by node guid). Persists across
+  // search/collapse/re-render; drives the bulk-action bar.
+  const selectedNodes = new Set();
+  let treeSelectAllCheckbox = null;
+  // B7/O4: when on, the Flat view and the Orders parts lists also show lines
+  // flagged "Included in Parent" (normally hidden). Session-scoped.
+  let showIncludedInParent = false;
   let searchQuery = "";
   // When set, Tree view shows only this assembly and its descendants
   // (siblings/parents hidden). Cleared with the banner button or Esc.
@@ -191,6 +362,7 @@
 
   // ---------- Column widths (resizable grid) ----------
   const MIN_COL_WIDTH = 44;
+  const SELECT_COL_WIDTH = 30;
   const TOGGLE_COL_WIDTH = 34;
   const TREE_INDENT = 18; // px of indentation per tree depth level
   const TOGGLE_BTN_SPACE = 32; // room for the toggle button itself + padding
@@ -375,6 +547,18 @@
     const ctx = findContext(guid);
     if (!ctx) return;
     ctx.siblings.splice(ctx.index + 1, 0, makeNewNode());
+    persistAndRender();
+  }
+
+  // Insert `count` blank sibling rows immediately below a line (see B4).
+  function insertMultipleRows(guid, count) {
+    const ctx = findContext(guid);
+    if (!ctx) return;
+    const n = Math.max(0, Math.min(200, Math.floor(count)));
+    if (n === 0) return;
+    const newNodes = [];
+    for (let i = 0; i < n; i++) newNodes.push(makeNewNode());
+    ctx.siblings.splice(ctx.index + 1, 0, ...newNodes);
     persistAndRender();
   }
 
@@ -815,6 +999,20 @@
     const td = el("td");
     const rawValue = col.custom ? (node.custom ? node.custom[col.fieldKey] : undefined) : node[col.key];
 
+    if (READONLY) {
+      td.className = col.type === "checkbox" ? "cell-checkbox cell-readonly" : "cell-readonly";
+      td.textContent = col.type === "checkbox" ? (rawValue ? "✓" : "") : rawValue == null ? "" : String(rawValue);
+      // Keep the RFx tooltip (hover) and info panel (click) working read-only.
+      if (col.key === "rfx" && !col.custom) {
+        td.title = rfxTooltip(rawValue);
+        if ((rawValue || "").toString().trim()) {
+          td.style.cursor = "pointer";
+          td.addEventListener("click", () => showRfxInfo(rawValue));
+        }
+      }
+      return td;
+    }
+
     if (col.type === "checkbox") {
       td.className = "cell-checkbox";
       const input = el("input", { type: "checkbox" });
@@ -843,6 +1041,12 @@
         select.appendChild(el("option", { value: rawValue, text: rawValue + " (legacy)" }));
       }
       select.value = rawValue || "";
+      // RFx cell: hover shows the order's details (B6); focusing/changing it
+      // updates the dedicated RFx info panel (B5).
+      if (col.key === "rfx") {
+        select.title = rfxTooltip(rawValue);
+        select.addEventListener("focus", () => showRfxInfo(select.value));
+      }
       select.addEventListener("change", () => {
         setNodeValue(node, col, select.value, trEl);
         // Picking an RFx re-derives this line's PO, and a line's RFx/Status
@@ -850,6 +1054,7 @@
         if (col.key === "rfx") {
           node.po = lookupPoForRfx(select.value);
           saveBomTree();
+          showRfxInfo(select.value);
         }
         if (col.key === "rfx" || col.key === "status") renderBom();
       });
@@ -967,6 +1172,7 @@
         { separator: true },
         { label: "Insert Row Above", onClick: () => addSiblingAbove(node.guid) },
         { label: "Insert Row Below", onClick: () => addSibling(node.guid) },
+        { label: "Insert Rows…", onClick: () => openInsertRowsDialog(node.guid) },
         { label: "Add Sub-Item", onClick: () => addChild(node.guid) },
         { separator: true },
         { label: "Indent", disabled: index === 0, onClick: () => indentNode(node.guid) },
@@ -1022,6 +1228,67 @@
     assemblyFilterBanner.hidden = !show;
   }
 
+  // ---------- RFx details: hover tooltip (B6) + info panel (B5) ----------
+  function getOrderForRfx(rfx) {
+    const v = (rfx || "").trim();
+    if (!v) return null;
+    return orders.find((o) => (o.rfx || "").trim() === v) || null;
+  }
+
+  // Multi-line text for a native title tooltip on RFx cells (B6).
+  function rfxTooltip(rfx) {
+    const v = (rfx || "").trim();
+    if (!v) return "";
+    const o = getOrderForRfx(v);
+    if (!o) return "RFx " + v + "\n(not in the Orders table)";
+    const lines = ["RFx " + v];
+    if ((o.po || "").trim()) lines.push("PO: " + o.po.trim());
+    if ((o.description || "").trim()) lines.push(o.description.trim());
+    if ((o.supplierName || "").trim()) lines.push("Supplier: " + o.supplierName.trim());
+    if ((o.deliveryDate || "").trim()) lines.push("Delivery: " + o.deliveryDate.trim());
+    if ((o.status || "").trim()) lines.push("Status: " + o.status.trim());
+    return lines.join("\n");
+  }
+
+  const rfxInfoBanner = document.getElementById("rfxInfoBanner");
+  const rfxInfoContent = document.getElementById("rfxInfoContent");
+  const rfxInfoCloseBtn = document.getElementById("rfxInfoCloseBtn");
+
+  function hideRfxInfo() {
+    if (rfxInfoBanner) rfxInfoBanner.hidden = true;
+  }
+
+  // Fills and shows the dedicated RFx info panel for the given RFx (B5).
+  function showRfxInfo(rfx) {
+    if (!rfxInfoBanner) return;
+    const v = (rfx || "").trim();
+    if (!v) { hideRfxInfo(); return; }
+    const o = getOrderForRfx(v);
+    rfxInfoContent.innerHTML = "";
+    rfxInfoContent.appendChild(el("span", { class: "rfx-info-code", text: "RFx " + v }));
+    if (!o) {
+      rfxInfoContent.appendChild(el("span", { class: "rfx-info-muted", text: "not in the Orders table" }));
+    } else {
+      const bits = [];
+      if ((o.po || "").trim()) bits.push(["PO", o.po.trim()]);
+      if ((o.description || "").trim()) bits.push(["", o.description.trim()]);
+      if ((o.supplierName || "").trim()) bits.push(["Supplier", o.supplierName.trim()]);
+      if ((o.deliveryDate || "").trim()) bits.push(["Due", o.deliveryDate.trim()]);
+      if ((o.status || "").trim()) bits.push(["Status", o.status.trim()]);
+      if (bits.length === 0) {
+        rfxInfoContent.appendChild(el("span", { class: "rfx-info-muted", text: "no order details yet" }));
+      }
+      bits.forEach((b) => {
+        const chip = el("span", { class: "rfx-info-item" });
+        if (b[0]) chip.appendChild(el("span", { class: "rfx-info-label", text: b[0] + ": " }));
+        chip.appendChild(document.createTextNode(b[1]));
+        rfxInfoContent.appendChild(chip);
+      });
+    }
+    rfxInfoBanner.hidden = false;
+  }
+  if (rfxInfoCloseBtn) rfxInfoCloseBtn.addEventListener("click", hideRfxInfo);
+
   function renderTreeView() {
     const cols = getAllColumns().filter((c) => !hiddenTreeColumns.has(c.key));
 
@@ -1048,26 +1315,41 @@
     const maxDepth = rows.reduce((max, r) => Math.max(max, r.depth), 0);
     const toggleColWidth = Math.max(TOGGLE_COL_WIDTH, maxDepth * TREE_INDENT + TOGGLE_BTN_SPACE);
 
-    const colDefs = [{ key: "__toggle__", width: toggleColWidth }];
+    // The selection checkbox and row-actions columns are editing affordances,
+    // so a read-only export drops them entirely.
+    const colDefs = [];
+    if (!READONLY) colDefs.push({ key: "__select__", width: SELECT_COL_WIDTH });
+    colDefs.push({ key: "__toggle__", width: toggleColWidth });
     cols.forEach((c) => colDefs.push({ key: c.key, width: treeColWidths[c.key] || getDefaultColWidth(c) }));
-    colDefs.push({ key: "__actions__", width: treeColWidths.__actions__ });
+    if (!READONLY) colDefs.push({ key: "__actions__", width: treeColWidths.__actions__ });
     renderColgroup(bomColgroup, colDefs);
     const colEls = bomColgroup.querySelectorAll("col");
 
     const headRow = el("tr");
-    headRow.appendChild(el("th", {}));
+    if (!READONLY) {
+      const selectAllTh = el("th", { class: "cell-select-col" });
+      const selectAllCb = el("input", { type: "checkbox", title: "Select all shown lines" });
+      selectAllCb.addEventListener("change", () => toggleSelectAllVisible(selectAllCb.checked));
+      selectAllTh.appendChild(selectAllCb);
+      treeSelectAllCheckbox = selectAllCb;
+      headRow.appendChild(selectAllTh);
+    }
+    headRow.appendChild(el("th", {})); // toggle column
     cols.forEach((c) => {
       const th = el("th", {}, [el("span", { class: "th-label", text: c.label })]);
       headRow.appendChild(th);
     });
-    headRow.appendChild(el("th", {}, [el("span", { class: "th-label", text: "Actions" })]));
+    if (!READONLY) headRow.appendChild(el("th", {}, [el("span", { class: "th-label", text: "Actions" })]));
     bomThead.innerHTML = "";
     bomThead.appendChild(headRow);
 
     const headThs = headRow.querySelectorAll("th");
     headThs.forEach((th, idx) => {
-      if (idx === 0) return; // toggle column isn't resizable
-      attachColumnResize(th, colEls[idx], treeColWidths, colDefs[idx].key);
+      // The select and toggle columns aren't resizable; the trailing Actions
+      // column is (when present).
+      const key = colDefs[idx].key;
+      if (key === "__select__" || key === "__toggle__") return;
+      attachColumnResize(th, colEls[idx], treeColWidths, key);
     });
 
     bomTbody.innerHTML = "";
@@ -1083,6 +1365,21 @@
       const levelClass = "bom-level-" + Math.min(depth, 5);
       const tr = el("tr", { class: (node.assy ? "assy-row " : "") + levelClass });
       tr.dataset.guid = node.guid;
+
+      if (!READONLY) {
+        const selectTd = el("td", { class: "cell-select-col" });
+        const rowCb = el("input", { type: "checkbox" });
+        rowCb.checked = selectedNodes.has(node.guid);
+        rowCb.addEventListener("change", () => {
+          if (rowCb.checked) selectedNodes.add(node.guid);
+          else selectedNodes.delete(node.guid);
+          tr.classList.toggle("row-selected", rowCb.checked);
+          updateSelectionUi();
+        });
+        if (rowCb.checked) tr.classList.add("row-selected");
+        selectTd.appendChild(rowCb);
+        tr.appendChild(selectTd);
+      }
 
       const hasChildren = node.children && node.children.length > 0;
       const toggleTd = el("td");
@@ -1113,8 +1410,14 @@
           cell = el("td", {
             class: "cell-computed cell-inherited",
             text: c.key === "rfx" ? info.rfx : info.status,
-            title: "Inherited from parent assembly (Included in Parent)",
+            title: c.key === "rfx"
+              ? rfxTooltip(info.rfx) + "\n(Inherited from parent assembly)"
+              : "Inherited from parent assembly (Included in Parent)",
           });
+          if (c.key === "rfx" && (info.rfx || "").trim()) {
+            cell.style.cursor = "pointer";
+            cell.addEventListener("click", () => showRfxInfo(info.rfx));
+          }
         } else {
           cell = renderEditableCell(node, c, tr);
           if (c.key === "partNumber") {
@@ -1140,12 +1443,174 @@
         cell.dataset.gridCol = ci;
         tr.appendChild(cell);
       });
-      tr.appendChild(renderActionsCell(node, depth));
+      if (!READONLY) tr.appendChild(renderActionsCell(node, depth));
 
       applyConflictStyling(tr, node, conflicts);
       bomTbody.appendChild(tr);
     });
+
+    updateSelectAllState();
   }
+
+  // ---------- Tree View line selection + bulk actions ----------
+  const bomSelectionBar = document.getElementById("bomSelectionBar");
+  const bomSelectionCount = document.getElementById("bomSelectionCount");
+  const bulkSetStatusBtn = document.getElementById("bulkSetStatusBtn");
+  const bulkSetRfxBtn = document.getElementById("bulkSetRfxBtn");
+  const bulkClearNotesBtn = document.getElementById("bulkClearNotesBtn");
+  const bulkDeleteBtn = document.getElementById("bulkDeleteBtn");
+  const bulkClearSelectionBtn = document.getElementById("bulkClearSelectionBtn");
+
+  function visibleTreeGuids() {
+    return Array.from(bomTbody.querySelectorAll("tr[data-guid]")).map((tr) => tr.dataset.guid);
+  }
+  function getSelectedNodeList() {
+    const out = [];
+    selectedNodes.forEach((guid) => {
+      const ctx = findContext(guid);
+      if (ctx) out.push(ctx.node);
+    });
+    return out;
+  }
+  function selectionCount() {
+    let n = 0;
+    selectedNodes.forEach((guid) => { if (findContext(guid)) n += 1; });
+    return n;
+  }
+  function updateSelectAllState() {
+    if (!treeSelectAllCheckbox) return;
+    const vis = visibleTreeGuids();
+    const selVis = vis.filter((g) => selectedNodes.has(g)).length;
+    treeSelectAllCheckbox.checked = vis.length > 0 && selVis === vis.length;
+    treeSelectAllCheckbox.indeterminate = selVis > 0 && selVis < vis.length;
+  }
+  function updateSelectionBar() {
+    if (!bomSelectionBar) return;
+    const count = currentView === "tree" ? selectionCount() : 0;
+    bomSelectionBar.hidden = count === 0;
+    if (count > 0) bomSelectionCount.textContent = count + " line" + (count === 1 ? "" : "s") + " selected";
+  }
+  function updateSelectionUi() {
+    updateSelectAllState();
+    updateSelectionBar();
+  }
+  function toggleSelectAllVisible(checked) {
+    visibleTreeGuids().forEach((g) => {
+      if (checked) selectedNodes.add(g);
+      else selectedNodes.delete(g);
+    });
+    bomTbody.querySelectorAll("tr[data-guid]").forEach((tr) => {
+      const cb = tr.querySelector('td.cell-select-col input[type="checkbox"]');
+      if (cb) {
+        cb.checked = selectedNodes.has(tr.dataset.guid);
+        tr.classList.toggle("row-selected", cb.checked);
+      }
+    });
+    updateSelectionUi();
+  }
+  function clearSelection() {
+    selectedNodes.clear();
+    renderBom();
+  }
+
+  // Bulk actions operate on the selected lines only.
+  function bulkDelete() {
+    const nodes = getSelectedNodeList();
+    if (nodes.length === 0) return;
+    if (!window.confirm("Delete " + nodes.length + " selected line" + (nodes.length === 1 ? "" : "s") +
+      " (and any of their sub-items)?")) return;
+    nodes.forEach((node) => {
+      const ctx = findContext(node.guid); // re-find: a parent may already be gone
+      if (ctx) ctx.siblings.splice(ctx.index, 1);
+    });
+    selectedNodes.clear();
+    persistAndRender();
+    flashSaveIndicator();
+  }
+  function applyBulkField(setter) {
+    const nodes = getSelectedNodeList();
+    if (nodes.length === 0) return;
+    nodes.forEach(setter);
+    saveBomTree();
+    renderBom();
+    renderOrders();
+    flashSaveIndicator();
+  }
+  function bulkSetStatus() {
+    if (selectionCount() === 0) return;
+    const items = [{ label: "(none)", onClick: () => applyBulkField((n) => { n.status = ""; }) }];
+    statusOptions.forEach((opt) => items.push({ label: opt, onClick: () => applyBulkField((n) => { n.status = opt; }) }));
+    openPopupMenu(bulkSetStatusBtn, items);
+  }
+  function bulkSetRfx() {
+    if (selectionCount() === 0) return;
+    const items = [{ label: "(none)", onClick: () => applyBulkField((n) => { n.rfx = ""; n.po = lookupPoForRfx(""); }) }];
+    getOrderOptions("rfx").forEach((o) =>
+      items.push({ label: o, onClick: () => applyBulkField((n) => { n.rfx = o; n.po = lookupPoForRfx(o); }) })
+    );
+    openPopupMenu(bulkSetRfxBtn, items);
+  }
+  function bulkClearNotes() {
+    const nodes = getSelectedNodeList().filter((n) => (n.notes || "").trim() !== "");
+    if (nodes.length === 0) { window.alert("None of the selected lines have notes to clear."); return; }
+    if (!window.confirm("Clear Notes on " + nodes.length + " selected line" + (nodes.length === 1 ? "" : "s") + "?")) return;
+    nodes.forEach((n) => { n.notes = ""; });
+    saveBomTree();
+    renderBom();
+    renderOrders();
+    flashSaveIndicator();
+  }
+
+  if (bulkSetStatusBtn) bulkSetStatusBtn.addEventListener("click", (e) => { e.stopPropagation(); bulkSetStatus(); });
+  if (bulkSetRfxBtn) bulkSetRfxBtn.addEventListener("click", (e) => { e.stopPropagation(); bulkSetRfx(); });
+  if (bulkClearNotesBtn) bulkClearNotesBtn.addEventListener("click", bulkClearNotes);
+  if (bulkDeleteBtn) bulkDeleteBtn.addEventListener("click", bulkDelete);
+  if (bulkClearSelectionBtn) bulkClearSelectionBtn.addEventListener("click", clearSelection);
+
+  // ---------- Insert multiple rows dialog (B4) ----------
+  const insertRowsDialog = document.getElementById("insertRowsDialog");
+  const insertRowsForm = document.getElementById("insertRowsForm");
+  const insertRowsCount = document.getElementById("insertRowsCount");
+  const insertRowsCancelBtn = document.getElementById("insertRowsCancelBtn");
+  let insertRowsTargetGuid = null;
+
+  function openInsertRowsDialog(guid) {
+    insertRowsTargetGuid = guid;
+    insertRowsCount.value = "1";
+    insertRowsDialog.showModal();
+    insertRowsCount.focus();
+    insertRowsCount.select();
+  }
+  if (insertRowsForm) {
+    insertRowsForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const count = parseInt(insertRowsCount.value, 10);
+      if (!count || count < 1) { insertRowsCount.focus(); return; }
+      insertMultipleRows(insertRowsTargetGuid, count);
+      insertRowsDialog.close();
+    });
+    insertRowsCancelBtn.addEventListener("click", () => insertRowsDialog.close());
+    insertRowsDialog.addEventListener("click", (e) => {
+      if (e.target === insertRowsDialog) insertRowsDialog.close();
+    });
+  }
+
+  // ---------- Show "Included in Parent" toggle (B7 Flat / O4 Orders) ----------
+  const showIncludedBtn = document.getElementById("showIncludedBtn");
+  const showIncludedOrdersBtn = document.getElementById("showIncludedOrdersBtn");
+
+  function refreshIncludedToggleButton(btn) {
+    if (!btn) return;
+    btn.classList.toggle("active", showIncludedInParent);
+    btn.textContent = showIncludedInParent ? "Hide Included-in-Parent" : "Show Included-in-Parent";
+  }
+  function toggleShowIncluded() {
+    showIncludedInParent = !showIncludedInParent;
+    renderBom();
+    renderOrders();
+  }
+  if (showIncludedBtn) showIncludedBtn.addEventListener("click", toggleShowIncluded);
+  if (showIncludedOrdersBtn) showIncludedOrdersBtn.addEventListener("click", toggleShowIncluded);
 
   // Flattens the tree for the Flat/PO/RFx views, extending each node's Qty
   // by the Qty of every ancestor above it — a sub-item under a parent with
@@ -1155,7 +1620,10 @@
   // Items flagged "Included in Parent" are left out of the flattened list
   // entirely (their material is already accounted for in the parent's own
   // part number), though their own children are still evaluated normally.
-  function collectFlatNodes(nodes, multiplier, out) {
+  // `includeIncluded` (B7/O4) keeps "Included in Parent" lines in the result
+  // instead of skipping them — used only by the on-screen views' toggle, never
+  // by the Excel export.
+  function collectFlatNodes(nodes, multiplier, out, includeIncluded) {
     if (multiplier === undefined) multiplier = 1;
     if (out === undefined) out = [];
     nodes.forEach((n) => {
@@ -1163,14 +1631,14 @@
       // to Qty before rolling up — and they carry down to children too (a
       // spare assembly needs a full set of its own parts).
       const extendedQty = ((Number(n.qty) || 0) + (Number(n.spare) || 0)) * multiplier;
-      if (!n.includedInParent && (n.partNumber || "").trim()) {
+      if ((includeIncluded || !n.includedInParent) && (n.partNumber || "").trim()) {
         const copy = Object.assign({}, n, { qty: extendedQty, po: lookupPoForRfx(n.rfx) });
         // Keep a link back to the real tree node so the aggregated views can
         // edit it (see aggregateByPartNumber's `sources`).
         copy.__node = n;
         out.push(copy);
       }
-      if (n.children && n.children.length) collectFlatNodes(n.children, extendedQty, out);
+      if (n.children && n.children.length) collectFlatNodes(n.children, extendedQty, out, includeIncluded);
     });
     return out;
   }
@@ -1219,6 +1687,7 @@
   ];
 
   function isAggregateEditable(col) {
+    if (READONLY) return false;
     if (col.type === "computed" || col.type === "derived-po") return false;
     return AGG_READONLY_KEYS.indexOf(col.key) === -1;
   }
@@ -1304,6 +1773,7 @@
       const ok = window.confirm(buildBulkEditWarning(row.partNumber, col, newValue, sources));
       if (!ok) {
         renderBom(); // discard the uncommitted input value
+        renderOrders(); // keep any expanded order-parts list in sync
         return;
       }
     }
@@ -1311,6 +1781,7 @@
     sources.forEach((node) => applyValueToNode(node, col, newValue));
     saveBomTree();
     renderBom();
+    renderOrders(); // an expanded order may be showing these same parts
   }
 
   // An editable cell for an aggregated row, mirroring the tree editor's
@@ -1401,17 +1872,151 @@
     );
   }
 
+  // ---------- Multi-select column filters (shared by Flat + Orders) ----------
+  // A column's filter is an array of chosen values on the filter model; empty
+  // means "no filter". A row matches when its value equals any chosen value
+  // (OR within a column); columns AND together. "(blank)" matches empty cells.
+  function getFilterSelected(columnFilters, key) {
+    if (!Array.isArray(columnFilters[key])) columnFilters[key] = [];
+    return columnFilters[key];
+  }
+
+  function activeFilterKeys(columnFilters) {
+    return Object.keys(columnFilters).filter(
+      (k) => Array.isArray(columnFilters[k]) && columnFilters[k].length > 0
+    );
+  }
+
+  function valueMatchesFilter(selected, text) {
+    return selected.some((v) => (v === "(blank)" ? text === "" : text === v));
+  }
+
+  function filterButtonLabel(selected) {
+    if (selected.length === 0) return "All";
+    if (selected.length === 1) return selected[0];
+    return selected.length + " selected";
+  }
+
+  let openFilterPanel = null;
+  function closeFilterPanel() {
+    if (!openFilterPanel) return;
+    openFilterPanel.remove();
+    openFilterPanel = null;
+    document.removeEventListener("mousedown", onFilterPanelDocMouseDown, true);
+    document.removeEventListener("keydown", onFilterPanelKeydown, true);
+  }
+  function onFilterPanelDocMouseDown(e) {
+    if (openFilterPanel && !openFilterPanel.contains(e.target) && e.target !== openFilterPanel._anchor) {
+      closeFilterPanel();
+    }
+  }
+  function onFilterPanelKeydown(e) {
+    if (e.key === "Escape") closeFilterPanel();
+  }
+
+  // The little header control: a button showing the filter state that opens a
+  // checkbox dropdown. `selected` is the live model array; `onChange` re-renders
+  // the table (the dropdown lives on <body>, so it survives that re-render).
+  function buildFilterControl(distinctValues, selected, onChange) {
+    const active = selected.length > 0;
+    const btn = el("button", {
+      type: "button",
+      class: "filter-select filter-multi" + (active ? " active" : ""),
+      title: active ? selected.join(", ") : "Filter this column",
+    });
+    btn.appendChild(el("span", { class: "filter-multi-label", text: filterButtonLabel(selected) }));
+    btn.appendChild(el("span", { class: "filter-caret", text: "▾" }));
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (openFilterPanel && openFilterPanel._anchor === btn) { closeFilterPanel(); return; }
+      openFilterDropdown(btn, distinctValues, selected, onChange);
+    });
+    return btn;
+  }
+
+  function openFilterDropdown(anchorEl, distinctValues, selected, onChange) {
+    closeFilterPanel();
+    const panel = el("div", { class: "filter-panel" });
+    panel._anchor = anchorEl;
+
+    const header = el("div", { class: "filter-panel-header" });
+    const search = el("input", { class: "filter-panel-search", type: "search", placeholder: "Search values…" });
+    const showSearch = distinctValues.length > 8;
+    if (showSearch) header.appendChild(search);
+    const links = el("div", { class: "filter-panel-links" });
+    const selectAllLink = el("button", { type: "button", class: "filter-panel-link", text: "Select all" });
+    const clearLink = el("button", { type: "button", class: "filter-panel-link", text: "Clear" });
+    links.appendChild(selectAllLink);
+    links.appendChild(clearLink);
+    header.appendChild(links);
+    panel.appendChild(header);
+
+    const list = el("div", { class: "filter-panel-list" });
+    panel.appendChild(list);
+
+    function visibleValues() {
+      const q = search.value.trim().toLowerCase();
+      return distinctValues.filter((v) => !q || v.toLowerCase().indexOf(q) !== -1);
+    }
+    function renderList() {
+      list.innerHTML = "";
+      const shown = visibleValues();
+      if (shown.length === 0) {
+        list.appendChild(el("div", { class: "filter-panel-empty", text: "No matching values" }));
+        return;
+      }
+      shown.forEach((v) => {
+        const item = el("label", { class: "filter-panel-item" });
+        const cb = el("input", { type: "checkbox" });
+        cb.checked = selected.indexOf(v) !== -1;
+        cb.addEventListener("change", () => {
+          const i = selected.indexOf(v);
+          if (cb.checked && i === -1) selected.push(v);
+          else if (!cb.checked && i !== -1) selected.splice(i, 1);
+          onChange();
+        });
+        item.appendChild(cb);
+        item.appendChild(el("span", { class: "filter-panel-item-label", text: v }));
+        list.appendChild(item);
+      });
+    }
+    search.addEventListener("input", renderList);
+    selectAllLink.addEventListener("click", () => {
+      visibleValues().forEach((v) => { if (selected.indexOf(v) === -1) selected.push(v); });
+      renderList();
+      onChange();
+    });
+    clearLink.addEventListener("click", () => {
+      selected.length = 0;
+      renderList();
+      onChange();
+    });
+    renderList();
+
+    document.body.appendChild(panel);
+    const r = anchorEl.getBoundingClientRect();
+    panel.style.position = "fixed";
+    panel.style.left = r.left + "px";
+    panel.style.top = r.bottom + 2 + "px";
+    panel.style.minWidth = Math.max(190, r.width) + "px";
+    const pr = panel.getBoundingClientRect();
+    if (pr.right > window.innerWidth - 6) panel.style.left = Math.max(6, window.innerWidth - pr.width - 6) + "px";
+    if (pr.bottom > window.innerHeight - 6) panel.style.top = Math.max(6, r.top - pr.height - 2) + "px";
+
+    openFilterPanel = panel;
+    document.addEventListener("mousedown", onFilterPanelDocMouseDown, true);
+    document.addEventListener("keydown", onFilterPanelKeydown, true);
+    if (showSearch) search.focus();
+  }
+
   function applyColumnFilters(rows, cols, columnFilters) {
-    const activeKeys = Object.keys(columnFilters).filter((k) => columnFilters[k]);
+    const activeKeys = activeFilterKeys(columnFilters);
     if (activeKeys.length === 0) return rows;
     return rows.filter((r) =>
       activeKeys.every((key) => {
         const col = cols.find((c) => c.key === key);
         if (!col) return true;
-        const text = getFlatCellText(r, col);
-        const filterVal = columnFilters[key];
-        if (filterVal === "(blank)") return text === "";
-        return text === filterVal;
+        return valueMatchesFilter(columnFilters[key], getFlatCellText(r, col));
       })
     );
   }
@@ -1458,7 +2063,7 @@
 
   function computeFlatRows() {
     const cols = getColumnsForView(flatExtraColumns);
-    let rows = aggregateByPartNumber(collectFlatNodes(tree));
+    let rows = aggregateByPartNumber(collectFlatNodes(tree, undefined, undefined, showIncludedInParent));
     rows = filterRowsBySearch(rows);
     rows = applyColumnFilters(rows, cols, flatColumnFilters);
     return sortRows(rows, flatSortState);
@@ -1540,17 +2145,8 @@
     cols.forEach((c) => {
       const td = el("td");
       const values = getDistinctColumnValues(optionRows, c);
-      const active = !!columnFilters[c.key];
-      const select = el("select", { class: "filter-select" + (active ? " active" : "") });
-      select.appendChild(el("option", { value: "", text: "All" }));
-      values.forEach((v) => select.appendChild(el("option", { value: v, text: v })));
-      select.value = columnFilters[c.key] || "";
-      select.addEventListener("change", () => {
-        if (select.value) columnFilters[c.key] = select.value;
-        else delete columnFilters[c.key];
-        renderBom();
-      });
-      td.appendChild(select);
+      const selected = getFilterSelected(columnFilters, c.key);
+      td.appendChild(buildFilterControl(values, selected, renderBom));
       tr.appendChild(td);
     });
     return tr;
@@ -1648,7 +2244,7 @@
     const headThs = headRow.querySelectorAll("th");
     headThs.forEach((th, idx) => attachColumnResize(th, colEls[idx], flatColWidths, colDefs[idx].key));
 
-    const optionRows = filterRowsBySearch(aggregateByPartNumber(collectFlatNodes(tree)));
+    const optionRows = filterRowsBySearch(aggregateByPartNumber(collectFlatNodes(tree, undefined, undefined, showIncludedInParent)));
     bomThead.appendChild(buildFilterRow(cols, flatColumnFilters, optionRows));
 
     bomTbody.innerHTML = "";
@@ -1883,10 +2479,17 @@
     groupFilterSelect.style.display = gv ? "" : "none";
     // PO filter only makes sense on the RFx view, where PO isn't the grouping key.
     poFilterSelect.style.display = gv ? "" : "none";
+    // "Show Included-in-Parent" toggle only applies to Flat view.
+    if (showIncludedBtn) {
+      showIncludedBtn.style.display = !isTree && !gv ? "" : "none";
+      refreshIncludedToggleButton(showIncludedBtn);
+    }
     if (isTree) renderTreeView();
     else if (gv) renderGroupedView(gv);
     else renderFlatView();
+    if (!isTree) hideRfxInfo(); // the RFx info panel is a Tree-view aid
     updateAssemblyFilterBanner();
+    updateSelectionBar();
   }
 
   if (assemblyFilterBanner) {
@@ -2199,6 +2802,23 @@
   const ordersTbody = document.getElementById("ordersTbody");
   const ordersEmpty = document.getElementById("ordersEmpty");
   const addOrderBtn = document.getElementById("addOrderBtn");
+  // Orders expanded to reveal their parts (session-scoped; keyed by order guid).
+  const expandedOrders = new Set();
+
+  const expandAllOrdersBtn = document.getElementById("expandAllOrdersBtn");
+  const collapseAllOrdersBtn = document.getElementById("collapseAllOrdersBtn");
+  if (expandAllOrdersBtn) {
+    expandAllOrdersBtn.addEventListener("click", () => {
+      orders.forEach((o) => expandedOrders.add(o.guid));
+      renderOrders();
+    });
+  }
+  if (collapseAllOrdersBtn) {
+    collapseAllOrdersBtn.addEventListener("click", () => {
+      expandedOrders.clear();
+      renderOrders();
+    });
+  }
 
   // Columns that can be sorted/filtered (the Actions column can't).
   const ORDER_COLUMNS = [
@@ -2236,13 +2856,10 @@
   function getVisibleOrders() {
     let list = orders.slice();
 
-    const activeKeys = Object.keys(orderColumnFilters).filter((k) => orderColumnFilters[k]);
+    const activeKeys = activeFilterKeys(orderColumnFilters);
     if (activeKeys.length) {
       list = list.filter((o) =>
-        activeKeys.every((k) => {
-          const t = orderCellText(o, k);
-          return orderColumnFilters[k] === "(blank)" ? t === "" : t === orderColumnFilters[k];
-        })
+        activeKeys.every((k) => valueMatchesFilter(orderColumnFilters[k], orderCellText(o, k)))
       );
     }
 
@@ -2279,26 +2896,17 @@
       });
       headRow.appendChild(th);
     });
-    headRow.appendChild(el("th", {}, [el("span", { class: "th-label", text: "Actions" })]));
+    if (!READONLY) headRow.appendChild(el("th", {}, [el("span", { class: "th-label", text: "Actions" })]));
     ordersThead.appendChild(headRow);
 
     const filterRow = el("tr", { class: "filter-row" });
     ORDER_COLUMNS.forEach((c) => {
       const td = el("td");
-      const active = !!orderColumnFilters[c.key];
-      const select = el("select", { class: "filter-select" + (active ? " active" : "") });
-      select.appendChild(el("option", { value: "", text: "All" }));
-      orderDistinctValues(c.key).forEach((v) => select.appendChild(el("option", { value: v, text: v })));
-      select.value = orderColumnFilters[c.key] || "";
-      select.addEventListener("change", () => {
-        if (select.value) orderColumnFilters[c.key] = select.value;
-        else delete orderColumnFilters[c.key];
-        renderOrders();
-      });
-      td.appendChild(select);
+      const selected = getFilterSelected(orderColumnFilters, c.key);
+      td.appendChild(buildFilterControl(orderDistinctValues(c.key), selected, renderOrders));
       filterRow.appendChild(td);
     });
-    filterRow.appendChild(el("td")); // Actions column has no filter
+    if (!READONLY) filterRow.appendChild(el("td")); // Actions column has no filter
     ordersThead.appendChild(filterRow);
   }
 
@@ -2370,6 +2978,11 @@
   }
 
   function orderTextCell(order, field, tr) {
+    if (READONLY) {
+      // A span (not bare text) so renderOrders can still lift firstChild into
+      // the RFx cell's toggle wrapper.
+      return el("td", {}, [el("span", { class: "cell-readonly", text: order[field] == null ? "" : String(order[field]) })]);
+    }
     const input = el("input", { class: "cell-input", type: "text" });
     input.value = order[field] || "";
     input.addEventListener("change", () => {
@@ -2383,11 +2996,113 @@
         propagateRfxChange(oldVal, newVal);
       }
       renderBom();
+      if (field === "rfx") renderOrders(); // refresh any expanded parts list
     });
     return el("td", {}, [input]);
   }
 
+  // The BOM parts on an order's RFx, aggregated by 3M part number (same rule as
+  // the RFx BOM view: self-owning lines only, Qty extended by ancestor Qty).
+  function orderParts(order) {
+    const rfx = (order.rfx || "").trim();
+    if (!rfx) return [];
+    let nodes;
+    if (showIncludedInParent) {
+      // Include "Included in Parent" lines too, matched by their effective
+      // (inherited) RFx so they land under the right order.
+      const parentMap = buildParentMap(tree, null);
+      nodes = collectFlatNodes(tree, undefined, undefined, true).filter(
+        (n) => resolveOrderInfo(n.__node || n, parentMap).rfx === rfx
+      );
+    } else {
+      nodes = collectFlatNodes(tree).filter((n) => (n.rfx || "").trim() === rfx);
+    }
+    return aggregateByPartNumber(nodes).sort((a, b) => a.partNumber.localeCompare(b.partNumber));
+  }
+
+  // Clears the Notes field on every real tree node behind a set of aggregated
+  // rows (e.g. all parts on one order's RFx). Shared by the Orders expansion.
+  function clearNotesOnAggregates(rows, label) {
+    const nodeSet = new Set();
+    rows.forEach((r) => (r.sources || []).forEach((n) => nodeSet.add(n)));
+    const withNotes = Array.from(nodeSet).filter((n) => (n.notes || "").trim() !== "");
+    if (withNotes.length === 0) {
+      window.alert("No parts on \"" + label + "\" have notes to clear.");
+      return;
+    }
+    const msg =
+      "Clear Notes on " + withNotes.length + " part" + (withNotes.length === 1 ? "" : "s") +
+      " on \"" + label + "\"? This can't be undone.";
+    if (!window.confirm(msg)) return;
+    withNotes.forEach((n) => { n.notes = ""; });
+    saveBomTree();
+    renderBom();
+    renderOrders();
+    flashSaveIndicator();
+  }
+
+  // The expandable child row beneath an order: a compact table of its parts.
+  // RFx, Status and Notes are editable — edits fan out to the underlying BOM
+  // lines (with a confirm when more than one is affected). Changing a part's
+  // RFx moves it to another order (O2).
+  function renderOrderPartsRow(order) {
+    const tr = el("tr", { class: "order-parts-row" });
+    const td = el("td", { colspan: READONLY ? "6" : "7" });
+    const parts = orderParts(order);
+    if (parts.length === 0) {
+      td.appendChild(el("div", { class: "order-parts-empty", text: "No BOM parts are on this RFx yet." }));
+    } else {
+      const totalQty = parts.reduce((s, p) => s + (Number(p.totalQty) || 0), 0);
+      const header = el("div", { class: "order-parts-header" });
+      header.appendChild(el("span", {
+        class: "order-parts-summary",
+        text: parts.length + " part" + (parts.length === 1 ? "" : "s") + "  ·  Qty " + totalQty,
+      }));
+      const clearBtn = el("button", {
+        type: "button",
+        class: "group-clear-notes-btn",
+        title: "Clear the Notes field on every part on this RFx",
+        text: "Clear Notes",
+      });
+      clearBtn.addEventListener("click", () =>
+        clearNotesOnAggregates(parts, (order.rfx || "").trim() || "(no RFx)")
+      );
+      header.appendChild(clearBtn);
+      td.appendChild(header);
+
+      const table = el("table", { class: "order-parts-table" });
+      const headRow = el("tr");
+      ["3M Part Number", "Description", "Qty", "Manufacturer", "Commercial Part No", "RFx", "Status", "Notes"].forEach((h) =>
+        headRow.appendChild(el("th", { text: h }))
+      );
+      table.appendChild(el("thead", {}, [headRow]));
+      const tbody = el("tbody");
+      const rfxCol = { key: "rfx", type: "order-lookup", orderField: "rfx", label: "RFx" };
+      const statusCol = { key: "status", type: "status-choice", label: "Status" };
+      const notesCol = { key: "notes", type: "text", label: "Notes" };
+      parts.forEach((p) => {
+        const r = el("tr");
+        r.appendChild(el("td", { text: p.partNumber }));
+        r.appendChild(el("td", { text: p.description || "" }));
+        r.appendChild(el("td", { class: "op-num", text: String(p.totalQty) }));
+        r.appendChild(el("td", { text: p.manufacturer || "" }));
+        r.appendChild(el("td", { text: p.commercialPartNo || "" }));
+        const rfxTd = renderAggregateCell(p, rfxCol); // editable — moves the part to another RFx
+        rfxTd.title = "Change to move this part to another order's RFx";
+        r.appendChild(rfxTd);
+        r.appendChild(renderAggregateCell(p, statusCol)); // editable, fans out to sources
+        r.appendChild(renderAggregateCell(p, notesCol));   // editable, fans out to sources
+        tbody.appendChild(r);
+      });
+      table.appendChild(tbody);
+      td.appendChild(table);
+    }
+    tr.appendChild(td);
+    return tr;
+  }
+
   function renderOrders() {
+    refreshIncludedToggleButton(showIncludedOrdersBtn);
     renderOrdersHeader();
     ordersTbody.innerHTML = "";
     ordersEmpty.hidden = orders.length !== 0;
@@ -2403,60 +3118,87 @@
     visible.forEach((order) => {
       const tr = el("tr");
 
-      tr.appendChild(orderTextCell(order, "rfx", tr));
+      // RFx cell carries the expand toggle that reveals this order's parts.
+      const rfxTd = orderTextCell(order, "rfx", tr);
+      rfxTd.classList.add("order-rfx-cell");
+      const isExpanded = expandedOrders.has(order.guid);
+      const expandToggle = el("button", {
+        type: "button",
+        class: "order-expand-toggle",
+        title: isExpanded ? "Hide parts" : "Show parts on this RFx",
+        text: isExpanded ? "▾" : "▸",
+      });
+      expandToggle.addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (expandedOrders.has(order.guid)) expandedOrders.delete(order.guid);
+        else expandedOrders.add(order.guid);
+        renderOrders();
+      });
+      const rfxInner = el("div", { class: "order-rfx-inner" });
+      rfxInner.appendChild(expandToggle);
+      rfxInner.appendChild(rfxTd.firstChild); // move the RFx input in beside the toggle
+      rfxTd.appendChild(rfxInner);
+      tr.appendChild(rfxTd);
+
       tr.appendChild(orderTextCell(order, "po", tr));
       tr.appendChild(orderTextCell(order, "description", tr));
       tr.appendChild(orderTextCell(order, "supplierName", tr));
 
-      const dateInput = el("input", { class: "cell-input", type: "date" });
-      dateInput.value = order.deliveryDate || "";
-      dateInput.addEventListener("change", () => {
-        order.deliveryDate = dateInput.value;
-        saveOrders();
-        renderBom();
-      });
-      tr.appendChild(el("td", {}, [dateInput]));
+      if (READONLY) {
+        tr.appendChild(el("td", {}, [el("span", { class: "cell-readonly", text: order.deliveryDate || "" })]));
+        tr.appendChild(el("td", {}, [el("span", { class: "cell-readonly", text: order.status || "" })]));
+      } else {
+        const dateInput = el("input", { class: "cell-input", type: "date" });
+        dateInput.value = order.deliveryDate || "";
+        dateInput.addEventListener("change", () => {
+          order.deliveryDate = dateInput.value;
+          saveOrders();
+          renderBom();
+        });
+        tr.appendChild(el("td", {}, [dateInput]));
 
-      // Same option list as the BOM Status column.
-      const statusSelect = el("select", { class: "cell-select" });
-      statusSelect.appendChild(el("option", { value: "", text: "(none)" }));
-      statusOptions.forEach((opt) => statusSelect.appendChild(el("option", { value: opt, text: opt })));
-      if (order.status && statusOptions.indexOf(order.status) === -1) {
-        statusSelect.appendChild(el("option", { value: order.status, text: order.status + " (legacy)" }));
-      }
-      statusSelect.value = order.status || "";
-      statusSelect.addEventListener("change", () => {
-        order.status = statusSelect.value;
-        saveOrders();
-        renderBom();
-      });
-      tr.appendChild(el("td", {}, [statusSelect]));
+        // Same option list as the BOM Status column.
+        const statusSelect = el("select", { class: "cell-select" });
+        statusSelect.appendChild(el("option", { value: "", text: "(none)" }));
+        statusOptions.forEach((opt) => statusSelect.appendChild(el("option", { value: opt, text: opt })));
+        if (order.status && statusOptions.indexOf(order.status) === -1) {
+          statusSelect.appendChild(el("option", { value: order.status, text: order.status + " (legacy)" }));
+        }
+        statusSelect.value = order.status || "";
+        statusSelect.addEventListener("change", () => {
+          order.status = statusSelect.value;
+          saveOrders();
+          renderBom();
+        });
+        tr.appendChild(el("td", {}, [statusSelect]));
 
-      const actionsTd = el("td", { class: "cell-actions" });
-      const menuBtn = el("button", { type: "button", class: "row-menu-btn", title: "Order actions", text: "⋮" });
-      menuBtn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        openPopupMenu(menuBtn, [
-          { label: "Update Status", onClick: () => applyOrderStatusToBom(order) },
-          { separator: true },
-          {
-            label: "Delete",
-            danger: true,
-            onClick: () => {
-              if (!window.confirm("Delete this order?")) return;
-              const idx = orders.indexOf(order);
-              if (idx !== -1) orders.splice(idx, 1);
-              saveOrders();
-              renderOrders();
-              renderBom();
+        const actionsTd = el("td", { class: "cell-actions" });
+        const menuBtn = el("button", { type: "button", class: "row-menu-btn", title: "Order actions", text: "⋮" });
+        menuBtn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          openPopupMenu(menuBtn, [
+            { label: "Update Status", onClick: () => applyOrderStatusToBom(order) },
+            { separator: true },
+            {
+              label: "Delete",
+              danger: true,
+              onClick: () => {
+                if (!window.confirm("Delete this order?")) return;
+                const idx = orders.indexOf(order);
+                if (idx !== -1) orders.splice(idx, 1);
+                saveOrders();
+                renderOrders();
+                renderBom();
+              },
             },
-          },
-        ]);
-      });
-      actionsTd.appendChild(menuBtn);
-      tr.appendChild(actionsTd);
+          ]);
+        });
+        actionsTd.appendChild(menuBtn);
+        tr.appendChild(actionsTd);
+      }
 
       ordersTbody.appendChild(tr);
+      if (expandedOrders.has(order.guid)) ordersTbody.appendChild(renderOrderPartsRow(order));
     });
   }
 
@@ -2900,6 +3642,7 @@
     });
 
     document.addEventListener("paste", (e) => {
+      if (READONLY) return; // a read-only export never writes back
       if (!isActiveGrid()) return;
       const text = e.clipboardData ? e.clipboardData.getData("text/plain") : "";
       if (text == null || text === "") return;
@@ -3072,13 +3815,14 @@
   // a glance. Deeper levels than the palette reuse the last (deepest) color.
   // These feed both the styles.xml fills/xfs (see buildXlsxWorkbook) and the
   // STYLE_IDS map below, which must agree on indices.
+  // Monochrome gradient: darkest at the top level, lightening with depth.
   const LEVEL_FILL_COLORS = [
-    "FFBDD7EE", // level 0 — blue
-    "FFC6E0B4", // level 1 — green
-    "FFFFE699", // level 2 — gold
-    "FFF8CBAD", // level 3 — orange
-    "FFD9C3EC", // level 4 — purple
-    "FFDEDEDE", // level 5+ — gray
+    "FFC4C4C4", // level 0 — darkest
+    "FFD0D0D0", // level 1
+    "FFDBDBDB", // level 2
+    "FFE6E6E6", // level 3
+    "FFF0F0F0", // level 4
+    "FFF8F8F8", // level 5+ — lightest
   ];
   // Level fills append after the 3 base fills; each level gets a plain and a
   // centered cell-xf after the 5 base xfs.
@@ -3632,6 +4376,92 @@
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     );
   });
+
+  // ---------- Export a self-contained, read-only HTML snapshot (G2) ----------
+  // Export a self-contained, read-only copy of the app scoped to this one
+  // project. The real stylesheet and app script are inlined, the project's data
+  // is embedded on the page, and a small Store shim feeds that data to the app
+  // (all writes are no-ops). The app runs in read-only mode — showing only the
+  // Bill of Materials and Orders tabs — so the file looks and behaves like the
+  // live app but needs no server or database.
+  async function exportProjectHtml() {
+    let assets;
+    try {
+      showToast("Building HTML export…");
+      const [projectHtml, stylesCss, projectCss, projectJs] = await Promise.all([
+        fetch("project.html").then((r) => r.text()),
+        fetch("css/styles.css").then((r) => r.text()),
+        fetch("css/project.css").then((r) => r.text()),
+        fetch("js/project.js").then((r) => r.text()),
+      ]);
+      assets = { projectHtml: projectHtml, stylesCss: stylesCss, projectCss: projectCss, projectJs: projectJs };
+    } catch (err) {
+      showToast("Export failed: could not read the app files");
+      return;
+    }
+
+    // Reuse the app's own markup: strip its external <link>/<script> tags (we
+    // inline everything) and keep the rest, so every element project.js looks
+    // up still exists.
+    const parsed = new DOMParser().parseFromString(assets.projectHtml, "text/html");
+    parsed.querySelectorAll("link[rel='stylesheet'], script[src]").forEach((n) => n.remove());
+    const bodyHtml = parsed.body.innerHTML;
+
+    const data = {
+      project: project,
+      tree: tree,
+      orders: orders,
+      statusOptions: statusOptions,
+      customFields: customFields,
+      parts: parts,
+    };
+    // Escape "<" so no string value can break out of the <script> block.
+    const dataJson = JSON.stringify(data).replace(/</g, "\\u003c");
+
+    // A synchronous Store shim: project.js calls Store.* exactly as it calls the
+    // real (synchronous) Store, but every read returns the embedded data and
+    // every write is a no-op.
+    const shim =
+      "(function(){var D=window.__MBOM_DATA__||{};" +
+      "function mid(){return 'id-'+Math.random().toString(36).slice(2)+Date.now().toString(36);}" +
+      "window.Store={" +
+      "getProjects:function(){return [D.project];}," +
+      "getProjectById:function(){return D.project;}," +
+      "getBom:function(){return D.tree||[];}," +
+      "getOrders:function(){return D.orders||[];}," +
+      "getStatusOptions:function(){return D.statusOptions||[];}," +
+      "getCustomFields:function(){return D.customFields||[];}," +
+      "getParts:function(){return D.parts||[];}," +
+      "makeId:mid," +
+      "saveProjects:function(){},addProject:function(){},updateProject:function(){}," +
+      "deleteProject:function(){},saveBom:function(){},saveOrders:function(){}," +
+      "saveStatusOptions:function(){},saveCustomFields:function(){},saveParts:function(){}" +
+      "};})();";
+
+    // Neutralise any literal </script> in the inlined code so it can't close the
+    // wrapping tag early ("<\/script>" is identical to the browser at runtime).
+    const jsInline = assets.projectJs.replace(/<\/script>/gi, "<\\/script>");
+    const cssInline = (assets.stylesCss + "\n" + assets.projectCss).replace(/<\/style>/gi, "<\\/style>");
+
+    const title = (project.wbs ? project.wbs + " — " : "") + (project.name || "Project") + " (read-only)";
+
+    const html =
+      "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n" +
+      "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n" +
+      "<title>" + xmlEscape(title) + "</title>\n<style>\n" + cssInline + "\n</style>\n</head>\n" +
+      "<body>\n" + bodyHtml + "\n" +
+      "<script>window.__MBOM_READONLY__=true;window.__MBOM_DATA__=" + dataJson + ";</script>\n" +
+      "<script>" + shim + "</script>\n" +
+      "<script>" + jsInline + "</script>\n" +
+      "</body>\n</html>";
+
+    const baseName = (project.wbs || project.name || "project").replace(/[^a-z0-9\-_.]+/gi, "_");
+    downloadFile(html, baseName + "-readonly.html", "text/html;charset=utf-8");
+    showToast("Exported read-only HTML");
+  }
+
+  const exportHtmlBtn = document.getElementById("exportHtmlBtn");
+  if (exportHtmlBtn) exportHtmlBtn.addEventListener("click", exportProjectHtml);
 
   // ---------- Import from Excel (CSV template round-trip) ----------
   // CSV is the interchange format: Excel opens/edits/saves it natively with

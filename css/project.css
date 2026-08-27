@@ -1459,3 +1459,38 @@ dialog#moveDialog .settings-body {
 .settings-close:hover {
   background: var(--color-row-hover);
 }
+
+/* ---------- Read-only export ---------- */
+/* The exported HTML runs the real app with window.__MBOM_READONLY__ set, which
+   adds .readonly to <body>. Every data cell renders as static text, so here we
+   only hide the editing affordances and the tabs/panels outside the export's
+   scope (Project Details, Parts List). All viewing features stay visible. */
+body.readonly .back-link,
+body.readonly .save-indicator,
+body.readonly #importExcelBtn,
+body.readonly #exportHtmlBtn,
+body.readonly #exportExcelBtn,
+body.readonly #addRootItemBtn,
+body.readonly #bomSettingsBtn,
+body.readonly #addOrderBtn,
+body.readonly .tab-btn[data-tab="details"],
+body.readonly .tab-btn[data-tab="parts"],
+body.readonly #tab-details,
+body.readonly #tab-parts,
+body.readonly #bomSelectionBar,
+body.readonly .import-help {
+  display: none !important;
+}
+
+/* Static value shown where an editable input/select used to be. Scoped to
+   <span> only: on the tree the class sits on the <td> itself, which must stay a
+   table cell (its own rules already clip + ellipsize). Orders wrap the value in
+   a span so it can be lifted beside the RFx expand toggle. */
+body.readonly span.cell-readonly {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+}

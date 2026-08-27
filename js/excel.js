@@ -54,13 +54,15 @@ window.Excel = (function () {
   // BOM Tree depth colors (mirror js/project.js): one solid fill per level.
   // Deeper levels than the palette reuse the last color. Feeds styles.xml and
   // the STYLE_IDS indices below, which must agree.
+  // Monochrome gradient: darkest at the top level, lightening with depth
+  // (mirror js/project.js).
   const LEVEL_FILL_COLORS = [
-    "FFBDD7EE", // level 0 — blue
-    "FFC6E0B4", // level 1 — green
-    "FFFFE699", // level 2 — gold
-    "FFF8CBAD", // level 3 — orange
-    "FFD9C3EC", // level 4 — purple
-    "FFDEDEDE", // level 5+ — gray
+    "FFC4C4C4", // level 0 — darkest
+    "FFD0D0D0", // level 1
+    "FFDBDBDB", // level 2
+    "FFE6E6E6", // level 3
+    "FFF0F0F0", // level 4
+    "FFF8F8F8", // level 5+ — lightest
   ];
   LEVEL_FILL_COLORS.forEach((_, i) => {
     STYLE_IDS["level" + i] = 5 + i * 2;
