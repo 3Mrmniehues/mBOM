@@ -192,21 +192,28 @@
     const lines = [ORDER_COLUMNS.map((c) => c.label).join("\t")];
     const partsHeader = ["", "3M Part Number", "Description", "Qty", "Manufacturer", "Commercial Part No", "RFx", "Status", "Notes"];
     const visible = getVisibleOrders();
+    const appendParts = (parts) => {
+      if (!parts.length) return;
+      lines.push(partsHeader.join("\t"));
+      parts.forEach((p) => {
+        lines.push(
+          ["", p.partNumber, p.description, p.totalQty, p.manufacturer, p.commercialPartNo, p.rfx, p.status, p.notes]
+            .map(tsvClean)
+            .join("\t")
+        );
+      });
+    };
     visible.forEach((order) => {
       lines.push(ORDER_COLUMNS.map((c) => tsvClean(order[c.key])).join("\t"));
-      const parts = orderParts(order);
-      if (parts.length) {
-        lines.push(partsHeader.join("\t"));
-        parts.forEach((p) => {
-          lines.push(
-            ["", p.partNumber, p.description, p.totalQty, p.manufacturer, p.commercialPartNo, p.rfx, p.status, p.notes]
-              .map(tsvClean)
-              .join("\t")
-          );
-        });
-      }
+      appendParts(orderParts(order));
     });
-    return { tsv: lines.join("\n"), orders: visible.length };
+    // The "(none)" catch-all for BOM items with no RFx.
+    const noneParts = unassignedParts();
+    if (noneParts.length) {
+      lines.push(ORDER_COLUMNS.map((c) => (c.key === "rfx" ? "(none)" : "")).join("\t"));
+      appendParts(noneParts);
+    }
+    return { tsv: lines.join("\n"), orders: visible.length + (noneParts.length ? 1 : 0) };
   }
 
   const copyBomBtn = document.getElementById("copyBomBtn");
@@ -225,7 +232,7 @@
   }
   if (copyOrdersBtn) {
     copyOrdersBtn.addEventListener("click", () => {
-      if (orders.length === 0) { showToast("Nothing to copy"); return; }
+      if (orders.length === 0 && unassignedParts().length === 0) { showToast("Nothing to copy"); return; }
       const result = ordersWithPartsToTsv();
       writeClipboardText(result.tsv).then(() =>
         showToast("Copied " + result.orders + " order" + (result.orders === 1 ? "" : "s") + " (with parts) to clipboard")
@@ -1204,12 +1211,21 @@
     renderBom();
   }
 
+  // Move the focus up one level, to the parent of the currently filtered
+  // assembly. Top-level assemblies have no parent (use Clear filter instead).
+  function filterToParentAssembly() {
+    if (!assemblyFilterGuid) return;
+    const parent = buildParentMap(tree, null).get(assemblyFilterGuid);
+    if (parent && parent.guid) filterToAssembly(parent.guid);
+  }
+
   const bomColgroup = document.getElementById("bomColgroup");
   const bomThead = document.getElementById("bomThead");
   const bomTbody = document.getElementById("bomTbody");
   const bomEmpty = document.getElementById("bomEmpty");
   const assemblyFilterBanner = document.getElementById("assemblyFilterBanner");
   const assemblyFilterLabel = document.getElementById("assemblyFilterLabel");
+  const assemblyFilterUpBtn = document.getElementById("assemblyFilterUpBtn");
 
   function updateAssemblyFilterBanner() {
     if (!assemblyFilterBanner) return;
@@ -1222,6 +1238,15 @@
         const desc = (ctx.node.description || "").trim();
         assemblyFilterLabel.textContent =
           "Showing only assembly " + (itemNo ? itemNo + " · " : "") + pn + (desc ? " — " + desc : "");
+        // "Up to Parent" is available only when the focused assembly is nested.
+        if (assemblyFilterUpBtn) {
+          const parent = buildParentMap(tree, null).get(assemblyFilterGuid);
+          const parentPn = parent ? ((parent.partNumber || "").trim() || "(no part number)") : "";
+          assemblyFilterUpBtn.disabled = !(parent && parent.guid);
+          assemblyFilterUpBtn.title = parent && parent.guid
+            ? "Focus the parent assembly (" + parentPn + ")"
+            : "Top-level assembly — no parent (use Clear filter to show the whole tree)";
+        }
         show = true;
       }
     }
@@ -1422,18 +1447,21 @@
           cell = renderEditableCell(node, c, tr);
           if (c.key === "partNumber") {
             cell.classList.add("cell-part-number");
-            // Assemblies (rows with children) get a 3-dots menu here to focus
-            // the tree on just this assembly and its parts.
+            // Assemblies (rows with children) get a filter icon here that
+            // focuses the tree on just this assembly and its parts.
             if (hasChildren) {
-              cell.classList.add("has-assembly-menu");
+              cell.classList.add("has-assembly-filter");
               const asmBtn = el("button", {
-                type: "button", class: "assembly-menu-btn", title: "Assembly options", text: "⋮",
+                type: "button",
+                class: "assembly-filter-btn",
+                title: "Filter the tree to show only this assembly and its parts",
               });
+              asmBtn.innerHTML =
+                '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false">' +
+                '<path fill="currentColor" d="M1.5 3 L14.5 3 L9.5 9 L9.5 13 L6.5 13 L6.5 9 Z"/></svg>';
               asmBtn.addEventListener("click", (e) => {
                 e.stopPropagation();
-                openPopupMenu(asmBtn, [
-                  { label: "Filter to this assembly", onClick: () => filterToAssembly(node.guid) },
-                ]);
+                filterToAssembly(node.guid);
               });
               cell.appendChild(asmBtn);
             }
@@ -1789,6 +1817,14 @@
   function renderAggregateCell(row, col) {
     const td = el("td");
     const rawValue = getFlatCellValue(row, col);
+
+    if (READONLY) {
+      // A read-only export renders aggregate cells (e.g. an order's expanded
+      // parts) as static text — no editable inputs/selects.
+      if (col.type === "checkbox") td.className = "cell-checkbox";
+      td.textContent = col.type === "checkbox" ? (rawValue ? "✓" : "") : rawValue == null ? "" : String(rawValue);
+      return td;
+    }
 
     if (col.type === "checkbox") {
       td.className = "cell-checkbox";
@@ -2495,6 +2531,7 @@
   if (assemblyFilterBanner) {
     const clearBtn = document.getElementById("clearAssemblyFilterBtn");
     if (clearBtn) clearBtn.addEventListener("click", clearAssemblyFilter);
+    if (assemblyFilterUpBtn) assemblyFilterUpBtn.addEventListener("click", filterToParentAssembly);
   }
 
   // Esc clears the assembly filter — but only when nothing else is claiming
@@ -2804,12 +2841,15 @@
   const addOrderBtn = document.getElementById("addOrderBtn");
   // Orders expanded to reveal their parts (session-scoped; keyed by order guid).
   const expandedOrders = new Set();
+  // Guid of the synthetic "(none)" row that groups BOM items with no RFx.
+  const NONE_BUCKET_GUID = "__none_rfx__";
 
   const expandAllOrdersBtn = document.getElementById("expandAllOrdersBtn");
   const collapseAllOrdersBtn = document.getElementById("collapseAllOrdersBtn");
   if (expandAllOrdersBtn) {
     expandAllOrdersBtn.addEventListener("click", () => {
       orders.forEach((o) => expandedOrders.add(o.guid));
+      if (unassignedParts().length) expandedOrders.add(NONE_BUCKET_GUID);
       renderOrders();
     });
   }
@@ -3004,6 +3044,7 @@
   // The BOM parts on an order's RFx, aggregated by 3M part number (same rule as
   // the RFx BOM view: self-owning lines only, Qty extended by ancestor Qty).
   function orderParts(order) {
+    if (order && order.__noneBucket) return unassignedParts();
     const rfx = (order.rfx || "").trim();
     if (!rfx) return [];
     let nodes;
@@ -3018,6 +3059,31 @@
       nodes = collectFlatNodes(tree).filter((n) => (n.rfx || "").trim() === rfx);
     }
     return aggregateByPartNumber(nodes).sort((a, b) => a.partNumber.localeCompare(b.partNumber));
+  }
+
+  // BOM parts with no RFx assigned, aggregated — the "(none)" catch-all bucket
+  // on the Orders page. Mirrors orderParts()'s Show Included-in-Parent handling,
+  // but matches a blank effective RFx.
+  function unassignedParts() {
+    let nodes;
+    if (showIncludedInParent) {
+      const parentMap = buildParentMap(tree, null);
+      nodes = collectFlatNodes(tree, undefined, undefined, true).filter(
+        (n) => !(resolveOrderInfo(n.__node || n, parentMap).rfx || "").trim()
+      );
+    } else {
+      nodes = collectFlatNodes(tree).filter((n) => !(n.rfx || "").trim());
+    }
+    return aggregateByPartNumber(nodes).sort((a, b) => a.partNumber.localeCompare(b.partNumber));
+  }
+
+  // Synthetic, non-persisted order representing "no RFx assigned". Used only to
+  // surface unassigned BOM items on the Orders page so they can be triaged.
+  function noneBucketOrder() {
+    return {
+      guid: NONE_BUCKET_GUID, __noneBucket: true,
+      rfx: "", po: "", description: "", supplierName: "", deliveryDate: "", status: "",
+    };
   }
 
   // Clears the Notes field on every real tree node behind a set of aggregated
@@ -3088,7 +3154,7 @@
         r.appendChild(el("td", { text: p.manufacturer || "" }));
         r.appendChild(el("td", { text: p.commercialPartNo || "" }));
         const rfxTd = renderAggregateCell(p, rfxCol); // editable — moves the part to another RFx
-        rfxTd.title = "Change to move this part to another order's RFx";
+        if (!READONLY) rfxTd.title = "Change to move this part to another order's RFx";
         r.appendChild(rfxTd);
         r.appendChild(renderAggregateCell(p, statusCol)); // editable, fans out to sources
         r.appendChild(renderAggregateCell(p, notesCol));   // editable, fans out to sources
@@ -3101,18 +3167,57 @@
     return tr;
   }
 
+  // A synthetic, read-only "(none)" order row grouping BOM items with no RFx.
+  // Expanding it lists those items; assigning an RFx there moves them to a real
+  // order. It is not stored and has no PO/supplier/status of its own.
+  function renderNoneBucketRow() {
+    const tr = el("tr", { class: "order-none-row" });
+    const rfxTd = el("td", { class: "order-rfx-cell" });
+    const isExpanded = expandedOrders.has(NONE_BUCKET_GUID);
+    const expandToggle = el("button", {
+      type: "button",
+      class: "order-expand-toggle",
+      title: isExpanded ? "Hide unassigned parts" : "Show BOM parts with no RFx assigned",
+      text: isExpanded ? "▾" : "▸",
+    });
+    expandToggle.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (expandedOrders.has(NONE_BUCKET_GUID)) expandedOrders.delete(NONE_BUCKET_GUID);
+      else expandedOrders.add(NONE_BUCKET_GUID);
+      renderOrders();
+    });
+    const rfxInner = el("div", { class: "order-rfx-inner" });
+    rfxInner.appendChild(expandToggle);
+    rfxInner.appendChild(el("span", { class: "order-none-label", text: "(none)" }));
+    rfxTd.appendChild(rfxInner);
+    tr.appendChild(rfxTd);
+
+    tr.appendChild(el("td")); // PO
+    tr.appendChild(el("td", {}, [el("span", { class: "order-none-hint", text: "BOM items with no RFx assigned" })]));
+    tr.appendChild(el("td")); // Supplier Name
+    tr.appendChild(el("td")); // Delivery Date
+    tr.appendChild(el("td")); // Status
+    if (!READONLY) tr.appendChild(el("td")); // Actions (none)
+    return tr;
+  }
+
   function renderOrders() {
     refreshIncludedToggleButton(showIncludedOrdersBtn);
     renderOrdersHeader();
     ordersTbody.innerHTML = "";
-    ordersEmpty.hidden = orders.length !== 0;
 
     const visible = getVisibleOrders();
-    if (orders.length && visible.length === 0) {
+    // The "(none)" catch-all shows whenever any BOM item lacks an RFx, so the
+    // table isn't "empty" while unassigned items exist.
+    const showNone = unassignedParts().length > 0;
+    if (orders.length === 0 && !showNone) {
+      ordersEmpty.hidden = false;
+      ordersEmpty.textContent = "No orders yet. Use \"+ Add Order\" to start.";
+    } else if (visible.length === 0 && !showNone) {
       ordersEmpty.hidden = false;
       ordersEmpty.textContent = "No orders match the current filters.";
     } else {
-      ordersEmpty.textContent = "No orders yet. Use \"+ Add Order\" to start.";
+      ordersEmpty.hidden = true;
     }
 
     visible.forEach((order) => {
@@ -3200,6 +3305,14 @@
       ordersTbody.appendChild(tr);
       if (expandedOrders.has(order.guid)) ordersTbody.appendChild(renderOrderPartsRow(order));
     });
+
+    // The "(none)" bucket always sits at the end, after the real orders.
+    if (showNone) {
+      ordersTbody.appendChild(renderNoneBucketRow());
+      if (expandedOrders.has(NONE_BUCKET_GUID)) {
+        ordersTbody.appendChild(renderOrderPartsRow(noneBucketOrder()));
+      }
+    }
   }
 
   // ---------- Add Order dialog ----------
@@ -3259,29 +3372,11 @@
     if (e.target === orderDialog) orderDialog.close();
   });
 
-  // ---------- Parts List ----------
-  // A project-scoped catalog of distinct parts (the 8 identity fields).
-  // Stays in sync with the BOM via syncPartsFromBom(), and doubles as the
-  // source for BOM part-number autocomplete. Assemblies remember a structural
-  // snapshot of their children so autocomplete can rebuild the hierarchy.
-  const partsThead = document.getElementById("partsThead");
-  const partsTbody = document.getElementById("partsTbody");
-  const partsEmpty = document.getElementById("partsEmpty");
-  const partsColgroup = document.getElementById("partsColgroup");
-  const addPartBtn = document.getElementById("addPartBtn");
-  const partsSearch = document.getElementById("partsSearch");
-  let partsSearchQuery = "";
-
-  const PARTS_COLUMNS = [
-    { key: "assy", label: "Assy", type: "checkbox" },
-    { key: "partNumber", label: "3M Part Number", type: "text" },
-    { key: "qty", label: "Qty", type: "number" },
-    { key: "spare", label: "Spare", type: "number" },
-    { key: "manufacturer", label: "Manufacturer", type: "text" },
-    { key: "commercialPartNo", label: "Commercial Part No", type: "text" },
-    { key: "supplied3M", label: "3M Supplied", type: "checkbox" },
-    { key: "description", label: "Description", type: "text" },
-  ];
+  // ---------- Parts catalog (backend / sync only) ----------
+  // A project-scoped catalog of distinct parts, kept in sync with the BOM by
+  // syncPartsFromBom() and persisted through the /api/parts backend. The Parts
+  // List tab/UI was removed (it wasn't useful), but the catalog still powers
+  // the BOM part-number autocomplete, so the sync and its helpers stay.
 
   function makeNewPart() {
     return {
@@ -3296,11 +3391,6 @@
       description: "",
       children: [],
     };
-  }
-
-  function savePartsList() {
-    Store.saveParts(project.id, parts);
-    flashSaveIndicator();
   }
 
   // A structural, order-agnostic snapshot of an assembly's descendants: keeps
@@ -3405,144 +3495,15 @@
 
     if (changed) {
       Store.saveParts(project.id, parts);
-      renderParts();
     }
   }
 
-  function getVisibleParts() {
-    const q = partsSearchQuery.trim().toLowerCase();
-    if (!q) return parts.slice();
-    return parts.filter((p) =>
-      [p.partNumber, p.description, p.manufacturer, p.commercialPartNo].some(
-        (v) => (v || "").toLowerCase().includes(q)
-      )
-    );
-  }
-
-  function partCell(part, col) {
-    if (col.type === "checkbox") {
-      const input = el("input", { type: "checkbox" });
-      input.checked = !!part[col.key];
-      input.addEventListener("change", () => {
-        part[col.key] = input.checked;
-        if (col.key === "assy") renderParts();
-        savePartsList();
-      });
-      return el("td", { class: "cell-checkbox" }, [input]);
-    }
-    if (col.type === "number") {
-      const input = el("input", { class: "cell-input narrow", type: "number" });
-      input.value = part[col.key] != null ? part[col.key] : "";
-      input.addEventListener("change", () => {
-        part[col.key] = Number(input.value) || 0;
-        savePartsList();
-      });
-      return el("td", {}, [input]);
-    }
-    const input = el("input", { class: "cell-input", type: "text" });
-    input.value = part[col.key] || "";
-    input.addEventListener("change", () => {
-      part[col.key] = input.value;
-      savePartsList();
-    });
-    const td = el("td", {}, [input]);
-    if (col.key === "partNumber" && part.assy && part.children && part.children.length) {
-      td.classList.add("cell-part-number", "has-parts-badge");
-      td.appendChild(
-        el("span", {
-          class: "parts-children-badge",
-          title: part.children.length + " remembered component" + (part.children.length === 1 ? "" : "s"),
-          text: "⊞ " + part.children.length,
-        })
-      );
-    }
-    return td;
-  }
-
-  function renderPartsHeader() {
-    partsThead.innerHTML = "";
-    const headRow = el("tr");
-    PARTS_COLUMNS.forEach((c) =>
-      headRow.appendChild(el("th", {}, [el("span", { class: "th-label", text: c.label })]))
-    );
-    headRow.appendChild(el("th", {}, [el("span", { class: "th-label", text: "Actions" })]));
-    partsThead.appendChild(headRow);
-  }
-
-  function renderParts() {
-    const colDefs = PARTS_COLUMNS.map((c) => ({ key: c.key, width: getDefaultColWidth(c) }));
-    colDefs.push({ key: "__actions__", width: 70 });
-    renderColgroup(partsColgroup, colDefs);
-
-    renderPartsHeader();
-    partsTbody.innerHTML = "";
-    partsEmpty.hidden = parts.length !== 0;
-
-    const visible = getVisibleParts();
-    if (parts.length && visible.length === 0) {
-      partsEmpty.hidden = false;
-      partsEmpty.textContent = "No parts match your search.";
-    } else if (parts.length === 0) {
-      partsEmpty.textContent =
-        "No parts yet. Parts appear here automatically as you build the BOM, or use \"+ Add Part\" to enter one manually.";
-    }
-
-    visible.forEach((part, ri) => {
-      const tr = el("tr", { class: part.assy ? "assy-row" : "" });
-      tr.dataset.guid = part.guid;
-      PARTS_COLUMNS.forEach((c, ci) => {
-        const cell = partCell(part, c);
-        cell.dataset.gridRow = ri;
-        cell.dataset.gridCol = ci;
-        tr.appendChild(cell);
-      });
-
-      const actionsTd = el("td", { class: "cell-actions" });
-      const menuBtn = el("button", { type: "button", class: "row-menu-btn", title: "Part actions", text: "⋮" });
-      menuBtn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        openPopupMenu(menuBtn, [
-          {
-            label: "Delete",
-            danger: true,
-            onClick: () => {
-              if (!window.confirm("Delete this part from the catalog?")) return;
-              const idx = parts.indexOf(part);
-              if (idx !== -1) parts.splice(idx, 1);
-              savePartsList();
-              renderParts();
-            },
-          },
-        ]);
-      });
-      actionsTd.appendChild(menuBtn);
-      tr.appendChild(actionsTd);
-      partsTbody.appendChild(tr);
-    });
-  }
-
-  addPartBtn.addEventListener("click", () => {
-    partsSearchQuery = "";
-    if (partsSearch) partsSearch.value = "";
-    parts.push(makeNewPart());
-    savePartsList();
-    renderParts();
-  });
-
-  if (partsSearch) {
-    partsSearch.addEventListener("input", () => {
-      partsSearchQuery = partsSearch.value;
-      renderParts();
-    });
-  }
-
-  // ---------- Excel-like range copy/paste (Tree view + Parts List) ----------
+  // ---------- Excel-like range copy/paste (Tree view) ----------
   // A grid-clipboard engine bound to a tbody whose data cells are tagged with
   // data-grid-row / data-grid-col during render. Click+drag or shift-click
   // selects a rectangle; Ctrl+C copies it as TSV (interoperates with Excel);
   // Ctrl+V pastes a TSV block from the top-left of the selection (or the
-  // active cell). Read-only cells are skipped on paste; the Parts List can
-  // grow new rows to fit the paste, the Tree cannot.
+  // active cell). Read-only cells are skipped on paste.
   function coerceCellValue(col, raw) {
     const s = raw == null ? "" : String(raw).trim();
     if (col.type === "checkbox") return ["x", "true", "1", "yes", "y"].indexOf(s.toLowerCase()) >= 0;
@@ -3712,45 +3673,6 @@
         return out;
       },
       commit: function () { persistAndRender(); },
-    };
-  }
-
-  function partsGridConfig() {
-    return {
-      tbody: partsTbody,
-      columns: function () {
-        return PARTS_COLUMNS.map((c) => ({
-          type: c.type,
-          readOnly: function () { return false; },
-          get: function (part) {
-            const v = part[c.key];
-            if (c.type === "checkbox") return v ? "X" : "";
-            return v == null ? "" : v;
-          },
-          set: function (part, raw) { part[c.key] = coerceCellValue(c, raw); },
-        }));
-      },
-      rowObjectAt: function (r) {
-        const tr = partsTbody.children[r];
-        if (!tr || !tr.dataset.guid) return null;
-        return parts.find((p) => p.guid === tr.dataset.guid) || null;
-      },
-      resolvePasteRows: function (startRow, n) {
-        const visibleGuids = Array.from(partsTbody.children).map((tr) => tr.dataset.guid);
-        const out = [];
-        for (let i = 0; i < n; i++) {
-          const idx = startRow + i;
-          if (idx < visibleGuids.length) {
-            out.push(parts.find((p) => p.guid === visibleGuids[idx]) || null);
-          } else {
-            const np = makeNewPart();
-            parts.push(np);
-            out.push(np);
-          }
-        }
-        return out;
-      },
-      commit: function () { savePartsList(); renderParts(); },
     };
   }
 
@@ -4918,9 +4840,7 @@
   Object.keys(groupedViews).forEach((k) => collapseAllGroups(groupedViews[k]));
   renderBom();
   renderOrders();
-  renderParts();
   makeGridClipboard(treeGridConfig());
-  makeGridClipboard(partsGridConfig());
   // Bootstrap the catalog from an existing BOM the first time only (the list
   // is empty, so there's nothing manual to overwrite). Afterward the catalog
   // updates on every BOM save via saveBomTree → syncPartsFromBom.
