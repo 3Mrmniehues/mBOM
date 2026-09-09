@@ -565,3 +565,26 @@ dialog#deleteProjectDialog::backdrop {
   background: var(--status-cancelled-bg);
   color: var(--status-cancelled-fg);
 }
+
+/* "Close App" button (stops the local server, then closes the window). Shared
+   by the project selector and project detail pages. Neutral until hovered,
+   where it turns red to signal a stop action. */
+.close-app-btn {
+  padding: 8px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+.close-app-btn:hover {
+  border-color: var(--status-cancelled-fg);
+  background: var(--status-cancelled-bg);
+  color: var(--status-cancelled-fg);
+}
+.close-app-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
