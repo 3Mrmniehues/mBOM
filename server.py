@@ -25,9 +25,20 @@ import traceback
 import urllib.parse
 from pathlib import Path
 
-BASE_DIR = Path(__file__).resolve().parent
-DB_PATH = BASE_DIR / "data" / "app.db"
-CONFIG_PATH = BASE_DIR / "config.ini"
+# When packaged as a one-file .exe (PyInstaller) the bundled static site is
+# unpacked to a temporary folder (sys._MEIPASS) that is read-only and wiped
+# between runs, so the database, config, logs and export file must live next to
+# the .exe instead. BASE_DIR = where the static assets are; DATA_DIR = where
+# persistent files go. Running as a plain script, the two are the same folder,
+# so behaviour is unchanged.
+if getattr(sys, "frozen", False):
+    BASE_DIR = Path(sys._MEIPASS)                      # bundled static site (temp, read-only)
+    DATA_DIR = Path(sys.executable).resolve().parent   # persistent, next to the .exe
+else:
+    BASE_DIR = Path(__file__).resolve().parent
+    DATA_DIR = BASE_DIR
+DB_PATH = DATA_DIR / "data" / "app.db"
+CONFIG_PATH = DATA_DIR / "config.ini"
 PORT = 8791
 
 # ---------------------------------------------------------------------------
@@ -324,8 +335,8 @@ def build_tree(rows):
     return roots
 
 
-ERROR_LOG = BASE_DIR / "server-error.log"
-DEFAULT_EXPORT_PATH = BASE_DIR / "data" / "export.json"
+ERROR_LOG = DATA_DIR / "server-error.log"
+DEFAULT_EXPORT_PATH = DATA_DIR / "data" / "export.json"
 
 
 def log_problem(message):
@@ -369,7 +380,7 @@ def resolve_export_path():
         return DEFAULT_EXPORT_PATH
     path = Path(raw).expanduser()
     if not path.is_absolute():
-        path = (BASE_DIR / path).resolve()
+        path = (DATA_DIR / path).resolve()
     return path
 
 
@@ -592,6 +603,13 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     # Every response here sets Content-Length, which HTTP/1.1 requires.
     protocol_version = "HTTP/1.1"
 
+    # Serve .webmanifest with the correct type (Python's mimetypes doesn't know
+    # it). A copy so we don't mutate the shared base-class map.
+    extensions_map = dict(
+        http.server.SimpleHTTPRequestHandler.extensions_map,
+        **{".webmanifest": "application/manifest+json"},
+    )
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(BASE_DIR), **kwargs)
 
@@ -640,9 +658,10 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
         if self.path.startswith("/api/"):
             return self._handle_api("GET")
-        if self.path == "/favicon.ico":
-            # The app ships no icon; answer politely instead of logging a 404
-            # on every page load and burying real errors.
+        if self.path == "/favicon.ico" and not (BASE_DIR / "favicon.ico").exists():
+            # No icon shipped: answer politely instead of logging a 404 on
+            # every page load and burying real errors. (When favicon.ico is
+            # present it falls through and is served like any other file.)
             self.send_response(204)
             self.send_header("Content-Length", "0")
             self.end_headers()
