@@ -68,11 +68,13 @@ This log groups the work by area rather than by date.
   (with its sub-items) relocates next to that part — anywhere in the tree, so it
   can change nesting too. A part can't be moved into its own sub-tree.
 - **Focus on one assembly:** rows that are assemblies (have children) show a
-  3-dots menu next to their part number with **Filter to this assembly**, which
-  collapses the Tree view down to just that assembly and its sub-parts — hiding
-  every sibling and parent. Item numbers keep their true path (e.g. 1.7.1.1). A
-  banner names the focused assembly; clear it with its **Clear filter** button
-  or the **Esc** key.
+  small **filter icon** next to their part number (hover text: "Filter the tree
+  to show only this assembly and its parts") that collapses the Tree view down
+  to just that assembly and its sub-parts — hiding every sibling and parent.
+  Item numbers keep their true path (e.g. 1.7.1.1). A banner names the focused
+  assembly; move up one level with **↑ Up to Parent** (re-focuses the parent
+  assembly; disabled at the top level), or clear it with the **Clear filter**
+  button or the **Esc** key.
 - **Data-quality flag:** lines sharing a 3M Part Number but with inconsistent
   Manufacturer, Commercial Part No, 3M Supplied, Description, RFx, or Status
   are highlighted, with an on-hover explanation of exactly what differs.
@@ -81,28 +83,28 @@ This log groups the work by area rather than by date.
   status), and focusing/clicking one fills a dedicated info panel above the
   table with the same details — so the rows stay clean. Works on inherited
   (Included-in-Parent) RFx cells too.
-- **Focus on one assembly:** assembly rows carry a 3-dots menu (next to the
-  part number) with **Filter to this assembly** — the Tree view collapses to
-  just that assembly and its sub-parts, hiding siblings and parents. Item
-  numbers keep their true path; clear with the banner button or **Esc**.
+- **Focus on one assembly:** assembly rows carry a small **filter icon** (next
+  to the part number) — the Tree view collapses to just that assembly and its
+  sub-parts, hiding siblings and parents. Item numbers keep their true path;
+  clear with the banner button or **Esc**.
 - **Level color-coding:** Tree view rows are shaded by their depth in the
   hierarchy with a **monochrome gradient** — darkest at the top level,
   lightening as you go deeper (the same palette as the Excel export), so the
   structure reads at a glance. The tint adapts to light/dark theme, and the
   data-quality warning still takes precedence on flagged rows.
-- **Excel-like copy/paste:** in Tree view and the Parts List, drag or
-  shift-click to select a rectangle of cells, **Ctrl+C** to copy as
-  tab-separated values, and **Ctrl+V** to paste a block from the top-left of
-  the selection. Interoperates with real Excel. Read-only columns (Item No,
-  derived PO, inherited RFx/Status) are skipped on paste; pasting past the end
-  of the Parts List adds new rows.
+- **Excel-like copy/paste:** in Tree view, drag or shift-click to select a
+  rectangle of cells, **Ctrl+C** to copy as tab-separated values, and **Ctrl+V**
+  to paste a block from the top-left of the selection. Interoperates with real
+  Excel. Read-only columns (Item No, derived PO, inherited RFx/Status) are
+  skipped on paste.
 
-## Parts List
+## Parts catalog (backend only)
 
-- A fourth tab: a project-scoped **catalog of distinct parts** (Assy, 3M Part
-  Number, Qty, Spare, Manufacturer, Commercial Part No, 3M Supplied,
-  Description), searchable and editable, with the same Excel-like copy/paste
-  as the BOM.
+The standalone **Parts List tab was removed** (it wasn't useful in practice).
+The parts catalog itself is retained as a backend feature — the `parts` table,
+the `/api/parts` routes, and the BOM→catalog sync all stay — because it powers
+BOM part-number autocomplete.
+
 - **Stays in sync with the BOM automatically:** every BOM save adds or updates
   the parts it uses (keyed by 3M Part Number); assemblies also remember a
   snapshot of their child components. Parts added manually — or no longer in
@@ -126,6 +128,11 @@ This log groups the work by area rather than by date.
   another order** (and re-derives its PO). This replaces the old RFx BOM view.
   Toolbar **Expand All / Collapse All** buttons open or close every order's
   parts at once.
+- **"(none)" catch-all row:** BOM items with no RFx assigned used to be invisible
+  on the Orders page. A synthetic **(none)** row now appears at the bottom of the
+  table whenever any item lacks an RFx; expand it to see those items and assign
+  each an RFx (which moves it to the matching order). It's display-only — not a
+  stored order — and it's included in **Copy Table** and the read-only export.
 - **Sort and filter** the Orders table: click a column header to sort
   (ascending/descending), and use the per-column **multi-select** filters
   (choose several values per column, OR-matched). Sorting and filtering affect
@@ -188,7 +195,36 @@ This log groups the work by area rather than by date.
 ## Running the app / infrastructure
 
 - `start-app.bat` launches the server windowless (no leftover console window)
-  and opens the browser; `stop-app.bat` stops it.
+  and opens the app; `stop-app.bat` stops it.
+- **Close App button** on every screen (project selector and project detail)
+  stops the local server — via the same `POST /api/shutdown` graceful shutdown
+  that `stop-app.bat` triggers (a web page can't launch a `.bat` directly), so
+  the final data snapshot is still written — then closes the window (works in
+  the Chrome app-mode / installed-PWA window; a normal tab shows a "you can
+  close this window" message instead). If **Google Chrome** is installed
+  it opens in Chrome **app mode** (`--app=`) — a clean, standalone window with
+  no tabs or address bar that carries the app's own icon — otherwise it falls
+  back to the default browser.
+- **App icon, install, and taskbar shortcut:** the app ships an icon
+  (`favicon.ico` + `icons/`) and a web manifest (`manifest.webmanifest`), so
+  Chrome/Edge offer **Install** — giving it a standalone window with its own
+  taskbar and Start-menu icon. `Create-mBOM-Shortcut.ps1` also makes Desktop
+  and Start-menu shortcuts (with the icon); pin either to the taskbar. The
+  server now serves `favicon.ico` and `.webmanifest`
+  (as `application/manifest+json`).
+- **Standalone `.exe` (`mBOM.exe`):** a one-file PyInstaller build that bundles
+  Python, the server, and the whole web app. Double-clicking it (or the
+  shortcut) **starts the server itself and opens the browser** — no separate
+  Python install or PATH needed. `server.py` is freeze-aware: static assets run
+  from the bundle, while the database, `config.ini`, logs and export file live
+  next to the `.exe` (so data persists between runs). Built via
+  `mbom_launcher.py` (the entry point). `Create-mBOM-Shortcut.ps1` targets the
+  `.exe` when present, else falls back to `start-app.bat`.
+- **Code signing (`sign.ps1`):** signs `mBOM.exe` with Authenticode + an
+  RFC-3161 timestamp. Defaults to a self-signed test cert (proves the pipeline;
+  **not** trusted by Windows/antivirus); pass `-Pfx`/`-Password` or
+  `-Thumbprint` to sign with a real CA code-signing certificate — required to
+  actually avoid SmartScreen/AV "unknown publisher" warnings.
 - Fixed a bug where pages loaded blank or intermittently — the server now
   speaks HTTP/1.1 and refuses to double-bind its port.
 - `README.md` documents setup and the Excel connection.
