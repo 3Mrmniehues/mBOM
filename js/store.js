@@ -21,6 +21,11 @@ const Store = (function () {
         ". Make sure it's running (python server.py)."
       );
     }
+    if (xhr.status === 401) {
+      // Session missing/expired — bounce to the login page.
+      window.location.href = "/login.html";
+      throw new Error("Not signed in.");
+    }
     if (xhr.status < 200 || xhr.status >= 300) {
       let message = xhr.responseText;
       try {

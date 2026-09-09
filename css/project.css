@@ -632,28 +632,34 @@ tr.conflict-row td.cell-part-number .cell-input {
 }
 
 /* Assembly (rows with children) 3-dots menu, at the part-number cell's edge. */
-td.cell-part-number.has-assembly-menu .cell-input {
-  padding-right: 24px;
+td.cell-part-number.has-assembly-filter .cell-input {
+  padding-right: 30px;
 }
 
-.assembly-menu-btn {
+.assembly-filter-btn {
   position: absolute;
   top: 50%;
   right: 3px;
   transform: translateY(-50%);
-  width: 20px;
-  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 24px;
   padding: 0;
   border: 1px solid transparent;
   border-radius: 4px;
   background: transparent;
   color: var(--color-text-muted);
-  font-size: 1rem;
   line-height: 1;
   cursor: pointer;
 }
 
-.assembly-menu-btn:hover {
+.assembly-filter-btn svg {
+  display: block;
+}
+
+.assembly-filter-btn:hover {
   background: var(--color-row-hover);
   border-color: var(--color-border);
   color: var(--color-text);
@@ -661,12 +667,12 @@ td.cell-part-number.has-assembly-menu .cell-input {
 
 /* When a row has both the warning badge and the assembly menu, keep them
    from overlapping: badge sits left of the menu button. */
-tr.conflict-row td.cell-part-number.has-assembly-menu .cell-input {
-  padding-right: 44px;
+tr.conflict-row td.cell-part-number.has-assembly-filter .cell-input {
+  padding-right: 50px;
 }
 
-td.cell-part-number.has-assembly-menu .conflict-badge {
-  right: 26px;
+td.cell-part-number.has-assembly-filter .conflict-badge {
+  right: 32px;
 }
 
 /* Focused-assembly banner */
@@ -812,6 +818,11 @@ th.cell-select-col input[type="checkbox"] {
   white-space: nowrap;
 }
 
+.tool-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
 .cell-input, .cell-select {
   width: 100%;
   min-width: 64px;
@@ -917,6 +928,21 @@ td.cell-checkbox input[type="checkbox"] {
   color: var(--color-text);
   background: var(--color-row-hover);
   border-color: var(--color-border);
+}
+
+/* Synthetic "(none)" row for BOM items with no RFx assigned. */
+.order-none-row td {
+  background: var(--color-row-hover);
+}
+.order-none-label {
+  font-style: italic;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  padding: 0 4px;
+}
+.order-none-hint {
+  font-style: italic;
+  color: var(--color-text-muted);
 }
 
 .order-parts-row > td {
@@ -1463,8 +1489,8 @@ dialog#moveDialog .settings-body {
 /* ---------- Read-only export ---------- */
 /* The exported HTML runs the real app with window.__MBOM_READONLY__ set, which
    adds .readonly to <body>. Every data cell renders as static text, so here we
-   only hide the editing affordances and the tabs/panels outside the export's
-   scope (Project Details, Parts List). All viewing features stay visible. */
+   only hide the editing affordances and the Project Details tab/panel (outside
+   the export's scope). All viewing features stay visible. */
 body.readonly .back-link,
 body.readonly .save-indicator,
 body.readonly #importExcelBtn,
@@ -1474,11 +1500,10 @@ body.readonly #addRootItemBtn,
 body.readonly #bomSettingsBtn,
 body.readonly #addOrderBtn,
 body.readonly .tab-btn[data-tab="details"],
-body.readonly .tab-btn[data-tab="parts"],
 body.readonly #tab-details,
-body.readonly #tab-parts,
 body.readonly #bomSelectionBar,
-body.readonly .import-help {
+body.readonly .import-help,
+body.readonly #closeAppBtn {
   display: none !important;
 }
 

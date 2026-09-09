@@ -565,3 +565,83 @@ dialog#deleteProjectDialog::backdrop {
   background: var(--status-cancelled-bg);
   color: var(--status-cancelled-fg);
 }
+
+/* "Close App" button (stops the local server, then closes the window). Shared
+   by the project selector and project detail pages. Neutral until hovered,
+   where it turns red to signal a stop action. */
+.close-app-btn {
+  padding: 8px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+.close-app-btn:hover {
+  border-color: var(--status-cancelled-fg);
+  background: var(--status-cancelled-bg);
+  color: var(--status-cancelled-fg);
+}
+.close-app-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* ---------- Auth: signed-in user + users admin modal ---------- */
+.current-user {
+  align-self: center;
+  margin-left: 6px;
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.users-dialog-body {
+  min-width: 420px;
+  max-width: 560px;
+}
+.users-intro {
+  margin: 0 0 12px;
+  color: var(--color-text-muted);
+  font-size: 0.85rem;
+}
+.users-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.users-table th,
+.users-table td {
+  text-align: left;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--color-border);
+  font-size: 0.9rem;
+}
+.users-actions-col { width: 1%; white-space: nowrap; }
+.users-row-actions { display: flex; gap: 6px; }
+.users-empty { color: var(--color-text-muted); font-size: 0.85rem; }
+.add-user-form {
+  margin-top: 14px;
+  border-top: 1px solid var(--color-border);
+  padding-top: 12px;
+}
+.add-user-form h3 { margin: 0 0 8px; font-size: 1rem; }
+.add-user-fields { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.add-user-fields input[type="text"],
+.add-user-fields input[type="password"] {
+  padding: 7px 9px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-size: 0.9rem;
+}
+.add-user-admin {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+}
+.users-dialog-actions { margin-top: 14px; text-align: right; }
