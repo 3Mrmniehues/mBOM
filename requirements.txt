@@ -1,0 +1,3 @@
+# The app is stdlib-only except for the Postgres driver used when DATABASE_URL
+# is set (i.e. on Render). Local runs use SQLite and don't need this installed.
+psycopg2-binary==2.9.10

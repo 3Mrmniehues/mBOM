@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sign in — mBOM</title>
+<link rel="icon" href="favicon.ico" sizes="any">
+<link rel="icon" type="image/png" href="icons/icon-192.png">
+<meta name="theme-color" content="#1e3a8a">
+<link rel="stylesheet" href="css/styles.css">
+<style>
+  .login-wrap {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+  }
+  .login-card {
+    width: 100%;
+    max-width: 360px;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    padding: 28px 26px;
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.18);
+  }
+  .login-brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 18px;
+  }
+  .login-brand img { width: 36px; height: 36px; }
+  .login-brand h1 { margin: 0; font-size: 1.25rem; }
+  .login-field { margin-bottom: 14px; }
+  .login-field label {
+    display: block;
+    font-size: 0.85rem;
+    color: var(--color-text-muted);
+    margin-bottom: 4px;
+  }
+  .login-field input {
+    width: 100%;
+    padding: 9px 10px;
+    border: 1px solid var(--color-border);
+    border-radius: 6px;
+    background: var(--color-bg);
+    color: var(--color-text);
+    font-size: 0.95rem;
+  }
+  .login-btn {
+    width: 100%;
+    margin-top: 6px;
+    padding: 10px;
+    border: none;
+    border-radius: 6px;
+    background: var(--color-primary);
+    color: #fff;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .login-btn:hover { background: var(--color-primary-hover); }
+  .login-btn:disabled { opacity: 0.6; cursor: default; }
+  .login-error {
+    margin: 0 0 14px;
+    padding: 8px 10px;
+    border-radius: 6px;
+    background: var(--status-cancelled-bg);
+    color: var(--status-cancelled-fg);
+    font-size: 0.85rem;
+  }
+</style>
+</head>
+<body>
+<div class="login-wrap">
+  <div class="login-card">
+    <div class="login-brand">
+      <img src="icons/icon-192.png" alt="">
+      <h1>mBOM</h1>
+    </div>
+    <p class="login-error" id="loginError" hidden></p>
+    <form id="loginForm" novalidate>
+      <div class="login-field">
+        <label for="username">Username</label>
+        <input type="text" id="username" name="username" autocomplete="username" autofocus required>
+      </div>
+      <div class="login-field">
+        <label for="password">Password</label>
+        <input type="password" id="password" name="password" autocomplete="current-password" required>
+      </div>
+      <button type="submit" class="login-btn" id="loginBtn">Sign in</button>
+    </form>
+  </div>
+</div>
+<script>
+  (function () {
+    var form = document.getElementById("loginForm");
+    var errEl = document.getElementById("loginError");
+    var btn = document.getElementById("loginBtn");
+
+    function showError(msg) {
+      errEl.textContent = msg;
+      errEl.hidden = false;
+    }
+
+    form.addEventListener("submit", function (e) {
+      e.preventDefault();
+      errEl.hidden = true;
+      btn.disabled = true;
+      var creds = {
+        username: document.getElementById("username").value,
+        password: document.getElementById("password").value,
+      };
+      fetch("/api/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(creds),
+      }).then(function (r) {
+        return r.json().then(function (data) { return { ok: r.ok, data: data }; });
+      }).then(function (res) {
+        if (res.ok) {
+          window.location.href = "/index.html";
+        } else {
+          showError((res.data && res.data.error) || "Sign in failed.");
+          btn.disabled = false;
+        }
+      }).catch(function () {
+        showError("Could not reach the server. Please try again.");
+        btn.disabled = false;
+      });
+    });
+  })();
+</script>
+</body>
+</html>

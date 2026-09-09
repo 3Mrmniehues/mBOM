@@ -1,0 +1,43 @@
+# Render Blueprint for mBOM.
+#
+# Deploy: push this repo to GitHub, then in Render choose New > Blueprint and
+# point it at the repo. Render reads this file to create the web service and a
+# managed Postgres database, and wires DATABASE_URL between them.
+#
+# IMPORTANT — set these in the Render dashboard after the first deploy (they are
+# marked sync:false so they are NOT committed):
+#   ADMIN_USERNAME   the first admin login
+#   ADMIN_PASSWORD   a strong password for that admin (the app refuses to create
+#                    the admin without these when hosted)
+#
+# Plan names and pricing change over time — confirm current values at
+# https://render.com/pricing. A `starter` web service stays always-on (no cold
+# starts) and a paid Postgres plan keeps data indefinitely; Render's *free*
+# Postgres is deleted after ~30 days, which would defeat persistent data.
+services:
+  - type: web
+    name: mbom
+    runtime: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: python server.py
+    healthCheckPath: /login.html
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.7"
+      - key: SESSION_SECURE
+        value: "1"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: mbom-db
+          property: connectionString
+      - key: ADMIN_USERNAME
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+
+databases:
+  - name: mbom-db
+    plan: basic-256mb
+    databaseName: mbom
+    user: mbom

@@ -4,6 +4,11 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Project Detail</title>
+<link rel="icon" href="favicon.ico" sizes="any">
+<link rel="icon" type="image/png" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#1e3a8a">
 <link rel="stylesheet" href="css/styles.css">
 <link rel="stylesheet" href="css/project.css">
 </head>
@@ -26,6 +31,9 @@
         <button type="button" class="export-btn secondary" id="importExcelBtn">Import from Excel</button>
         <button type="button" class="export-btn secondary" id="exportHtmlBtn" title="Save a self-contained, read-only copy of this project (Bill of Materials + Orders) that runs in any browser">Export HTML</button>
         <button type="button" class="export-btn" id="exportExcelBtn">Export to Excel</button>
+        <span id="currentUser" class="current-user"></span>
+        <button type="button" class="export-btn secondary" id="logoutBtn">Log out</button>
+        <button type="button" class="close-app-btn" id="closeAppBtn" title="Stop the local server and close the app">Close App</button>
       </div>
     </div>
 
@@ -33,7 +41,6 @@
       <button type="button" class="tab-btn" data-tab="details">Project Details</button>
       <button type="button" class="tab-btn active" data-tab="bom">Bill of Materials</button>
       <button type="button" class="tab-btn" data-tab="orders">Orders</button>
-      <button type="button" class="tab-btn" data-tab="parts">Parts List</button>
     </div>
 
     <div class="tab-panel" id="tab-details">
@@ -100,6 +107,7 @@
 
       <div class="assembly-filter-banner" id="assemblyFilterBanner" hidden>
         <span id="assemblyFilterLabel"></span>
+        <button type="button" class="tool-btn" id="assemblyFilterUpBtn" title="Focus the parent assembly">↑ Up to Parent</button>
         <button type="button" class="tool-btn" id="clearAssemblyFilterBtn">Clear filter (Esc)</button>
       </div>
 
@@ -157,27 +165,6 @@
       </p>
     </div>
 
-    <div class="tab-panel" id="tab-parts">
-      <div class="bom-toolbar">
-        <input type="search" id="partsSearch" placeholder="Search parts...">
-        <div class="spacer"></div>
-        <button type="button" class="tool-btn primary" id="addPartBtn">+ Add Part</button>
-      </div>
-      <div class="bom-table-wrap">
-        <table class="bom-grid" id="partsTable">
-          <colgroup id="partsColgroup"></colgroup>
-          <thead id="partsThead"></thead>
-          <tbody id="partsTbody"></tbody>
-        </table>
-      </div>
-      <div class="bom-empty" id="partsEmpty" hidden>No parts yet. Parts appear here automatically as you build the BOM, or use "+ Add Part" to enter one manually.</div>
-      <p class="import-help">
-        This catalog stays in sync with the Bill of Materials — every part you use there is
-        added here automatically. Parts you add manually are kept even if they're not in the
-        BOM. When you type a 3M Part Number on the BOM tab, matches from this list are
-        suggested for autocomplete; assemblies also remember their child components.
-      </p>
-    </div>
   </div>
 </div>
 
@@ -323,5 +310,7 @@
 
 <script src="js/store.js"></script>
 <script src="js/project.js"></script>
+<script src="js/auth.js"></script>
+<script src="js/close-app.js"></script>
 </body>
 </html>

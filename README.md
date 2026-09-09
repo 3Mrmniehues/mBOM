@@ -105,6 +105,15 @@ data/export.json    Default location of the flat JSON snapshot for Excel (reloca
 
 ## Notes
 
-- The server binds to `localhost` only — it's meant for local, single-user use, not for exposing on a network.
-- `js/store.js` talks to the server with synchronous requests, so saves apply immediately (no separate "sync" step) at the cost of a brief pause on each save. That's fine for a local server on the same machine.
-- To change the port, edit the `PORT` constant near the top of `server.py`.
+- **Local vs hosted:** with no `DATABASE_URL` the server binds `localhost:8791` and uses the SQLite file (single machine). When `DATABASE_URL` is set (e.g. on Render) it binds `0.0.0.0:$PORT` and uses Postgres. The port comes from `$PORT` (default `8791`); the SQLite path can be overridden with `BOM_DB_PATH`.
+- **Login is always required** now. The first admin comes from `ADMIN_USERNAME` / `ADMIN_PASSWORD` (locally these default to `admin`/`admin` with a printed warning — set them for real use). Each account has its own isolated projects/BOMs/orders.
+- `js/store.js` talks to the server with synchronous requests. That's fine on localhost; on a remote host each save/load has a brief network pause.
+
+## Deploying to Render (multi-user, persistent Postgres)
+
+1. Push this repo to GitHub (the SQLite `data/` and `config.ini` are gitignored and stay local).
+2. In Render: **New → Blueprint**, point it at the repo. `render.yaml` creates a web service + a managed Postgres and wires `DATABASE_URL` between them.
+3. In the web service's **Environment**, set `ADMIN_USERNAME` and `ADMIN_PASSWORD` (a strong secret) — the app refuses to create the first admin without them when hosted.
+4. Open the app's URL, sign in as that admin, then use **Manage Users** to add accounts. Get existing local projects up with **Export to Excel** (locally) → **Import from Excel** (hosted).
+
+Render's `pip install -r requirements.txt` pulls `psycopg2-binary` (only used on Postgres). Confirm current plan names/pricing at <https://render.com/pricing> — a paid Postgres avoids the free tier's ~30-day expiry, and a `starter` web service avoids cold starts.

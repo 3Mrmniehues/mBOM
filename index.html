@@ -4,6 +4,11 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Project Selector</title>
+<link rel="icon" href="favicon.ico" sizes="any">
+<link rel="icon" type="image/png" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#1e3a8a">
 <link rel="stylesheet" href="css/styles.css">
 </head>
 <body>
@@ -16,6 +21,10 @@
     <div class="header-buttons">
       <button type="button" class="secondary-btn" id="excelDataBtn">Excel Data</button>
       <button type="button" class="new-project-btn" id="newProjectBtn">+ New Project</button>
+      <button type="button" class="secondary-btn" id="manageUsersBtn" data-admin-only hidden>Manage Users</button>
+      <span id="currentUser" class="current-user"></span>
+      <button type="button" class="secondary-btn" id="logoutBtn">Log out</button>
+      <button type="button" class="close-app-btn" id="closeAppBtn" title="Stop the local server and close the app">Close App</button>
     </div>
   </header>
 
@@ -156,8 +165,40 @@
   </div>
 </dialog>
 
+<dialog id="usersDialog">
+  <div class="users-dialog-body">
+    <h2>Manage users</h2>
+    <p class="users-intro">Each account has its own separate projects, BOMs, and orders.</p>
+    <table class="users-table">
+      <thead>
+        <tr><th>Username</th><th>Role</th><th class="users-actions-col">Actions</th></tr>
+      </thead>
+      <tbody id="usersTableBody"></tbody>
+    </table>
+    <p class="users-empty" id="usersEmpty" hidden>No users yet.</p>
+
+    <form id="addUserForm" class="add-user-form" novalidate>
+      <h3>Add a user</h3>
+      <div class="add-user-fields">
+        <input type="text" id="newUsername" placeholder="Username" autocomplete="off" required>
+        <input type="password" id="newUserPassword" placeholder="Initial password" autocomplete="new-password" required>
+        <label class="add-user-admin"><input type="checkbox" id="newUserAdmin"> Admin</label>
+        <button type="submit" class="submit-btn">Add user</button>
+      </div>
+      <p class="form-error" id="usersError" hidden></p>
+    </form>
+
+    <div class="users-dialog-actions">
+      <button type="button" class="cancel-btn" id="closeUsersDialogBtn">Close</button>
+    </div>
+  </div>
+</dialog>
+
 <script src="js/excel.js"></script>
 <script src="js/store.js"></script>
 <script src="js/app.js"></script>
+<script src="js/auth.js"></script>
+<script src="js/users-admin.js"></script>
+<script src="js/close-app.js"></script>
 </body>
 </html>
