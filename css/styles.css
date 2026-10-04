@@ -1,4 +1,8 @@
 :root {
+  /* Let native controls (select dropdowns, <option> lists, date pickers,
+     scrollbars) follow the OS light/dark setting instead of rendering a light
+     popup over the dark theme — fixes the "inverse colors" RFx dropdown. */
+  color-scheme: light dark;
   --color-bg: #f5f6f8;
   --color-surface: #ffffff;
   --color-border: #dfe3e8;
@@ -19,8 +23,11 @@
   --level-3: #e6e6e6; --level-4: #f0f0f0; --level-5: #f8f8f8;
 }
 
+/* Dark tokens. Applied when the OS prefers dark (unless the user forced light),
+   and whenever the user explicitly picks dark via the theme toggle. The two
+   selectors are kept identical. */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --color-bg: #14161c;
     --color-surface: #1c1f27;
     --color-border: #2c303a;
@@ -34,6 +41,20 @@
     --level-3: #4c4c4c; --level-4: #545454; --level-5: #5c5c5c;
   }
 }
+:root[data-theme="dark"] {
+  --color-bg: #14161c;
+  --color-surface: #1c1f27;
+  --color-border: #2c303a;
+  --color-text: #e8eaed;
+  --color-text-muted: #9aa1ac;
+  --color-row-hover: #232733;
+  --color-warn-bg: #3a3113; --color-warn-fg: #f0c96b; --color-warn-border: #6b571f;
+  --level-0: #2e2e2e; --level-1: #383838; --level-2: #424242;
+  --level-3: #4c4c4c; --level-4: #545454; --level-5: #5c5c5c;
+}
+/* Keep native controls (dropdowns, date pickers) matched to the forced theme. */
+:root[data-theme="dark"] { color-scheme: dark; }
+:root[data-theme="light"] { color-scheme: light; }
 
 * { box-sizing: border-box; }
 
@@ -588,3 +609,87 @@ dialog#deleteProjectDialog::backdrop {
   opacity: 0.6;
   cursor: default;
 }
+
+/* ============ Project cards (home page) ============ */
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 16px;
+}
+.proj-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 14px;
+  padding: 16px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  transition: transform .12s ease, box-shadow .12s ease, border-color .12s ease;
+}
+.proj-card:hover {
+  transform: translateY(-3px);
+  border-color: var(--color-primary);
+  box-shadow: 0 12px 30px rgba(16, 24, 40, .14);
+}
+.card-wbs {
+  align-self: flex-start;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .02em;
+  color: var(--color-primary);
+  background: var(--color-row-hover);
+  padding: 3px 9px;
+  border-radius: 7px;
+}
+.card-wbs.muted { color: var(--color-text-muted); }
+.proj-card h3 { margin: 0; font-size: 16px; line-height: 1.3; color: var(--color-text); }
+.card-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  color: var(--color-text-muted);
+  font-size: 12.5px;
+}
+.card-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 2px;
+}
+.card-delete {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 9px;
+  border-radius: 7px;
+  cursor: pointer;
+}
+.card-delete:hover { background: var(--status-cancelled-bg); color: var(--status-cancelled-fg); }
+.card-actions { display: inline-flex; align-items: center; gap: 4px; }
+.card-edit {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 30px; height: 28px; border: 1px solid transparent; background: transparent;
+  color: var(--color-text-muted); border-radius: 7px; cursor: pointer;
+}
+.card-edit:hover { background: var(--color-row-hover); color: var(--color-primary); }
+.card-edit svg { display: block; }
+
+/* ============ Theme toggle button ============ */
+.theme-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 9px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: background .15s, color .15s;
+}
+.theme-btn:hover { background: var(--color-row-hover); color: var(--color-text); }
+.theme-btn svg { display: block; }

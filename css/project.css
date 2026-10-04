@@ -48,13 +48,11 @@
 .save-indicator {
   font-size: 0.82rem;
   color: var(--status-active-fg);
-  opacity: 0;
-  transition: opacity 0.2s;
-}
-
-.save-indicator.visible {
   opacity: 1;
+  transition: color 0.2s;
 }
+.save-indicator.visible { opacity: 1; }
+.save-indicator.unsaved { color: var(--color-warn-fg); font-weight: 600; }
 
 .export-btn {
   padding: 9px 16px;
@@ -322,6 +320,11 @@ table.bom-grid {
 table.bom-grid thead th {
   position: sticky;
   top: 0;
+  /* Sit above the body cells. Several cells (e.g. the 3M Part Number cell) are
+     position:relative, and since <tbody> follows <thead> in the DOM those
+     positioned cells would otherwise paint over the sticky header as rows
+     scroll under it. Stays well below menus/dropdowns (z-index 1100+). */
+  z-index: 5;
   text-align: left;
   padding: 8px 10px 8px 5px;
   border-bottom: 1px solid var(--color-border);
@@ -1493,12 +1496,16 @@ dialog#moveDialog .settings-body {
    the export's scope). All viewing features stay visible. */
 body.readonly .back-link,
 body.readonly .save-indicator,
+body.readonly #refreshBtn,
+body.readonly #homeBtn,
+body.readonly #settingsBtn,
 body.readonly #importExcelBtn,
 body.readonly #exportHtmlBtn,
 body.readonly #exportExcelBtn,
 body.readonly #addRootItemBtn,
 body.readonly #bomSettingsBtn,
 body.readonly #addOrderBtn,
+body.readonly .rail-sep,
 body.readonly .tab-btn[data-tab="details"],
 body.readonly #tab-details,
 body.readonly #bomSelectionBar,
@@ -1519,3 +1526,170 @@ body.readonly span.cell-readonly {
   white-space: nowrap;
   vertical-align: middle;
 }
+
+/* ======================================================================
+   App shell (collapsible left rail - BOM main - collapsible Orders panel)
+   ====================================================================== */
+#projectContent.shell { display: flex; height: 100vh; }
+
+.icon-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 34px; height: 34px; border-radius: 8px; border: 1px solid transparent;
+  background: transparent; color: var(--color-text-muted); cursor: pointer;
+  transition: background .15s, color .15s;
+}
+.icon-btn:hover { background: var(--color-row-hover); color: var(--color-text); }
+.icon-btn svg { display: block; }
+
+/* Left rail: icons only; labels on hover (overlay) or when pinned */
+.rail { width: 62px; flex-shrink: 0; position: relative; transition: width .18s ease; }
+.rail.pinned { width: 216px; }
+.rail-inner {
+  position: absolute; top: 0; left: 0; bottom: 0; width: 62px;
+  background: var(--color-surface); border-right: 1px solid var(--color-border);
+  display: flex; flex-direction: column; padding: 12px 10px; gap: 4px;
+  overflow: hidden; z-index: 30; transition: width .18s ease, box-shadow .18s ease;
+}
+.rail:hover .rail-inner, .rail.pinned .rail-inner { width: 216px; }
+.rail:hover:not(.pinned) .rail-inner { box-shadow: 0 16px 40px rgba(0,0,0,.28); }
+.rail-top { display: flex; align-items: center; gap: 10px; padding: 2px 4px 12px; min-height: 40px; }
+.rail-brand { font-weight: 800; font-size: 17px; letter-spacing: -.02em; white-space: nowrap; opacity: 0; transition: opacity .15s; color: var(--color-text); }
+.rail-toggle { flex-shrink: 0; }
+.rail-item {
+  display: flex; align-items: center; gap: 12px; width: 100%;
+  padding: 10px; border: 0; border-radius: 10px; background: transparent;
+  color: var(--color-text-muted); font-weight: 600; font-size: 13.5px;
+  white-space: nowrap; overflow: hidden; cursor: pointer;
+  transition: background .15s, color .15s;
+}
+.rail-item svg { flex-shrink: 0; }
+.rail-item:hover { background: var(--color-row-hover); color: var(--color-text); }
+.rail-item.danger:hover { background: var(--status-cancelled-bg); color: var(--status-cancelled-fg); }
+.rail-item .label { opacity: 0; transition: opacity .15s; }
+.rail:hover .rail-item .label, .rail.pinned .rail-item .label,
+.rail:hover .rail-brand, .rail.pinned .rail-brand { opacity: 1; }
+.rail-spacer { flex: 1; }
+.rail-sep { height: 1px; background: var(--color-border); margin: 6px 4px; }
+
+/* Main column + top bar */
+.main-col { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.topbar {
+  display: flex; align-items: center; gap: 14px; padding: 11px 18px;
+  border-bottom: 1px solid var(--color-border); background: var(--color-surface);
+}
+.topbar .title { min-width: 0; }
+.topbar .title h1 { margin: 0; font-size: 16px; letter-spacing: -.01em; line-height: 1.2; }
+.topbar .title .meta { color: var(--color-text-muted); font-size: 12.5px; }
+.topbar .spacer { flex: 1; }
+.topbar .btn {
+  display: inline-flex; align-items: center; gap: 7px; padding: 8px 13px; border-radius: 9px;
+  border: 1px solid var(--color-border); background: var(--color-surface); color: var(--color-text);
+  font-weight: 600; font-size: 13px; cursor: pointer;
+}
+.topbar .btn:hover { background: var(--color-row-hover); }
+.topbar .btn.active { background: var(--color-primary); border-color: var(--color-primary); color: #fff; }
+
+.work { flex: 1; display: flex; min-height: 0; }
+
+/* BOM main area (was the #tab-bom panel) */
+.bom-main { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
+.bom-main .bom-table-wrap { flex: 1; }
+
+/* BOM filter/highlight banner (driven by the Orders panel) */
+.bom-filter-banner {
+  display: flex; align-items: center; gap: 10px; padding: 8px 16px;
+  background: var(--color-row-hover); border-bottom: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-primary); font-size: 13px;
+}
+.bom-filter-banner[hidden] { display: none; }
+.bom-filter-banner b { color: var(--color-primary); }
+.bom-filter-banner .spacer { flex: 1; }
+.bom-filter-banner .link { border: 0; background: transparent; color: var(--color-primary); font-weight: 700; cursor: pointer; }
+table.bom-grid.bom-filtering tbody tr[data-guid]:not(.bom-hl) td { opacity: .32; }
+table.bom-grid tbody tr.bom-hl td { box-shadow: inset 3px 0 0 var(--color-primary); }
+
+/* Orders right panel */
+.orders-panel {
+  width: 380px; flex-shrink: 0; background: var(--color-surface);
+  border-left: 1px solid var(--color-border); display: flex; flex-direction: column;
+  transition: width .18s ease;
+}
+.orders-panel.collapsed { width: 0; border-left: 0; overflow: hidden; }
+.orders-list { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+/* Order detail: a floating pop-up card over the list (BOM stays visible/lit on the left). */
+.orders-detail {
+  position: fixed; z-index: 45; top: 64px; right: 14px; bottom: 14px;
+  width: 600px; max-width: calc(100vw - 28px);
+  display: flex; flex-direction: column; overflow: hidden;
+  background: var(--color-surface); border: 1px solid var(--color-border);
+  border-radius: 14px; box-shadow: 0 24px 60px rgba(0, 0, 0, .38);
+}
+.orders-detail[hidden] { display: none !important; }
+.orders-detail-head .back-to-list {
+  display: inline-flex; align-items: center; gap: 6px; border: 0; background: transparent;
+  color: var(--color-primary); font-weight: 700; font-size: 13px; cursor: pointer; padding: 4px 6px; border-radius: 7px;
+}
+.orders-detail-head .back-to-list:hover { background: var(--color-row-hover); }
+.orders-detail-head .spacer { flex: 1; }
+.orders-head { display: flex; align-items: center; gap: 8px; padding: 12px 14px; border-bottom: 1px solid var(--color-border); }
+.orders-head b { font-size: 14px; }
+.orders-head .count { color: var(--color-text-muted); font-size: 12px; font-weight: 600; }
+.orders-scroll { flex: 1; overflow: auto; }
+table.orders-compact { border-collapse: collapse; width: 100%; font-size: 13px; }
+table.orders-compact thead th {
+  position: sticky; top: 0; text-align: left; font-size: 11px; letter-spacing: .03em; text-transform: uppercase;
+  color: var(--color-text-muted); font-weight: 700; padding: 8px 12px; background: var(--color-surface); border-bottom: 1px solid var(--color-border);
+}
+table.orders-compact td { padding: 9px 12px; border-bottom: 1px solid var(--color-border); vertical-align: top; }
+table.orders-compact tbody tr { cursor: pointer; }
+table.orders-compact tbody tr:hover td { background: var(--color-row-hover); }
+table.orders-compact .oc-rfx { font-weight: 700; white-space: nowrap; }
+table.orders-compact .oc-desc { color: var(--color-text-muted); font-size: 12.5px; }
+table.orders-compact tr.none-row .oc-rfx { color: var(--color-text-muted); font-style: italic; }
+.orders-total-bar { padding: 10px 14px; border-top: 1px solid var(--color-border); display: flex; justify-content: flex-end; }
+.orders-total { font-size: 13px; font-weight: 700; color: var(--color-text); }
+.orders-foot { padding: 10px 12px; border-top: 1px solid var(--color-border); display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* Orders detail form */
+.orders-detail-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--color-border); }
+.orders-detail-head b { font-size: 14px; }
+.orders-detail-body { flex: 1; overflow: auto; padding: 14px; display: flex; flex-direction: column; gap: 12px; }
+.odf label { display: block; font-size: 11.5px; letter-spacing: .03em; text-transform: uppercase; color: var(--color-text-muted); font-weight: 700; margin-bottom: 4px; }
+.odf input, .odf select {
+  width: 100%; padding: 9px 11px; border-radius: 9px; border: 1px solid var(--color-border);
+  background: var(--color-bg); color: var(--color-text); font: inherit;
+}
+.odf-readonly {
+  padding: 9px 11px; border-radius: 9px; border: 1px solid var(--color-border);
+  background: var(--color-bg); color: var(--color-text);
+}
+.odf-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.orders-note { color: var(--color-text-muted); font-size: 12.5px; margin: 0; }
+.odf-parts-caprow { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; flex-wrap: wrap; }
+.odf-parts-cap {
+  display: inline-flex; align-items: center; gap: 6px; border: 0; background: transparent; cursor: pointer;
+  font-size: 11.5px; letter-spacing: .03em; text-transform: uppercase; color: var(--color-text-muted); font-weight: 700; padding: 2px 0;
+}
+.odf-parts-cap:hover { color: var(--color-text); }
+.odf-parts-caret { font-size: 10px; }
+.odf-copy { font-size: 11.5px; padding: 4px 9px; }
+.odf-incl { font-size: 11.5px; padding: 4px 9px; margin-left: auto; }
+table.odf-parts-table { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+table.odf-parts-table td { padding: 6px 8px; border-bottom: 1px dashed var(--color-border); }
+table.odf-parts-table td.pn { white-space: nowrap; font-weight: 600; }
+table.odf-parts-table td.muted { color: var(--color-text-muted); }
+table.odf-parts-table td.num { text-align: right; font-variant-numeric: tabular-nums; color: var(--color-text-muted); white-space: nowrap; }
+
+/* collapsed-orders reopen handle */
+.orders-handle {
+  position: fixed; right: 0; top: 50%; transform: translateY(-50%); writing-mode: vertical-rl;
+  background: var(--color-primary); color: #fff; font-weight: 700; font-size: 12px; letter-spacing: .05em;
+  padding: 12px 6px; border-radius: 8px 0 0 8px; cursor: pointer; z-index: 20;
+}
+.orders-handle[hidden] { display: none; }
+
+@media (max-width: 1100px) {
+  .orders-panel { position: fixed; right: 0; top: 0; height: 100vh; z-index: 40; box-shadow: 0 16px 40px rgba(0,0,0,.3); }
+  .orders-panel.collapsed { box-shadow: none; }
+}
+
