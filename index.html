@@ -9,6 +9,7 @@
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#1e3a8a">
+<script src="js/theme.js"></script>
 <link rel="stylesheet" href="css/styles.css">
 </head>
 <body>
@@ -19,6 +20,7 @@
       <p>Search, filter, and sort projects, then click one to open it.</p>
     </div>
     <div class="header-buttons">
+      <button type="button" class="theme-btn" id="themeBtn" title="Toggle light / dark theme" aria-label="Toggle theme"></button>
       <button type="button" class="secondary-btn" id="excelDataBtn">Excel Data</button>
       <button type="button" class="new-project-btn" id="newProjectBtn">+ New Project</button>
       <button type="button" class="close-app-btn" id="closeAppBtn" title="Stop the local server and close the app">Close App</button>
@@ -36,28 +38,24 @@
         <option value="">All statuses</option>
       </select>
     </div>
+    <div class="field">
+      <label for="sortSelect">Sort</label>
+      <select id="sortSelect">
+        <option value="dateCreated-desc">Newest first</option>
+        <option value="dateCreated-asc">Oldest first</option>
+        <option value="name-asc">Name (A–Z)</option>
+        <option value="name-desc">Name (Z–A)</option>
+        <option value="wbs-asc">WBS</option>
+        <option value="status-asc">Status</option>
+      </select>
+    </div>
     <button type="button" class="clear-btn" id="clearFiltersBtn">Clear filters</button>
   </div>
 
   <p class="result-count" id="resultCount"></p>
 
-  <div class="table-wrap">
-    <table>
-      <thead>
-        <tr>
-          <th scope="col" data-key="wbs">WBS<span class="sort-indicator"></span></th>
-          <th scope="col" data-key="ewr">EWR<span class="sort-indicator"></span></th>
-          <th scope="col" data-key="name">Project Name<span class="sort-indicator"></span></th>
-          <th scope="col" data-key="status">Status<span class="sort-indicator"></span></th>
-          <th scope="col" data-key="dateCreated">Date Created<span class="sort-indicator"></span></th>
-          <th scope="col" class="actions-col">Actions</th>
-        </tr>
-      </thead>
-      <tbody id="projectTableBody">
-      </tbody>
-    </table>
-    <div class="empty-state" id="emptyState" hidden>No projects match your filters.</div>
-  </div>
+  <div class="card-grid" id="projectCards"></div>
+  <div class="empty-state" id="emptyState" hidden>No projects match your filters.</div>
 </div>
 
 <dialog id="newProjectDialog">
@@ -66,12 +64,12 @@
 
     <div class="form-field">
       <label for="fieldWbs">WBS</label>
-      <input type="text" id="fieldWbs" name="wbs" required placeholder="e.g. 1.1.10">
+      <input type="text" id="fieldWbs" name="wbs" placeholder="e.g. 1.1.10">
     </div>
 
     <div class="form-field">
       <label for="fieldEwr">EWR</label>
-      <input type="text" id="fieldEwr" name="ewr" required placeholder="e.g. EWR-2024-050">
+      <input type="text" id="fieldEwr" name="ewr" placeholder="e.g. EWR-2024-050">
     </div>
 
     <div class="form-field">
@@ -81,7 +79,7 @@
 
     <div class="form-field">
       <label for="fieldStatus">Status</label>
-      <select id="fieldStatus" name="status" required>
+      <select id="fieldStatus" name="status">
         <option value="Active">Active</option>
         <option value="Archived">Archived</option>
       </select>
@@ -89,7 +87,7 @@
 
     <div class="form-field">
       <label for="fieldDateCreated">Date Created</label>
-      <input type="date" id="fieldDateCreated" name="dateCreated" required>
+      <input type="date" id="fieldDateCreated" name="dateCreated">
     </div>
 
     <p class="form-error" id="formError" hidden></p>
@@ -97,6 +95,40 @@
     <div class="form-actions">
       <button type="button" class="cancel-btn" id="cancelNewProjectBtn">Cancel</button>
       <button type="submit" class="submit-btn">Create Project</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="editProjectDialog">
+  <form id="editProjectForm" novalidate>
+    <h2>Edit Project</h2>
+    <div class="form-field">
+      <label for="editWbs">WBS</label>
+      <input type="text" id="editWbs" placeholder="e.g. 1.1.10">
+    </div>
+    <div class="form-field">
+      <label for="editEwr">EWR</label>
+      <input type="text" id="editEwr" placeholder="e.g. EWR-2024-050">
+    </div>
+    <div class="form-field">
+      <label for="editName">Project Name</label>
+      <input type="text" id="editName" required>
+    </div>
+    <div class="form-field">
+      <label for="editStatus">Status</label>
+      <select id="editStatus">
+        <option value="Active">Active</option>
+        <option value="Archived">Archived</option>
+      </select>
+    </div>
+    <div class="form-field">
+      <label for="editDateCreated">Date Created</label>
+      <input type="date" id="editDateCreated">
+    </div>
+    <p class="form-error" id="editFormError" hidden></p>
+    <div class="form-actions">
+      <button type="button" class="cancel-btn" id="cancelEditProjectBtn">Cancel</button>
+      <button type="submit" class="submit-btn">Save Changes</button>
     </div>
   </form>
 </dialog>

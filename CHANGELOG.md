@@ -9,11 +9,19 @@ This log groups the work by area rather than by date.
 
 ## Home page — project selection
 
-- Searchable, sortable, filterable project table (WBS, EWR, Name, Status,
-  Date Created).
-- **New Project** dialog with validation and duplicate-WBS checks.
+- **Project cards** (grid of tiles: WBS badge, name, EWR, created date, status
+  pill, **Edit** ✎ and Delete) replacing the old table — searchable and
+  status-filterable, with a **Sort** dropdown (newest/oldest, name, WBS, status).
+  Click a card to open it, or the **pencil** to edit its details in a dialog.
+- **Light / dark theme toggle** (sun/moon button) on both the home and project
+  pages — remembers your choice and falls back to the OS setting; native
+  dropdowns and date pickers follow it.
+- **New Project** dialog with validation and a duplicate-WBS check. Only
+  **Project Name** is required — WBS, EWR, Status, and Date Created are
+  optional (the WBS duplicate check only runs when a WBS is entered).
 - Clicking a row opens the project directly (the separate "Select Project"
-  button was removed).
+  button was removed). Rows open by project **id**, so a blank/shared WBS no
+  longer matters for navigation.
 - Opens **filtered to Active** by default; the Status field was simplified to
   **Active / Archived**.
 - **Delete a project** from its row, via a confirmation dialog that warns the
@@ -21,6 +29,28 @@ This log groups the work by area rather than by date.
   project to Excel first**. Deletion cascades server-side, leaving no orphaned
   data.
 - **Excel Data** button (see *Data storage & Excel connection*).
+
+## Project workspace — app shell
+
+- The project page is an **app shell**: a collapsible **left rail**, the Bill of
+  Materials as the main area, and a collapsible **Orders** panel on the right
+  (the Orders tab is gone). The old top tabs are removed.
+- **Left rail** shows icons only by default; hovering slides the labels out as an
+  overlay (the table doesn't move), and the ☰ toggle **pins** it open. Items:
+  Home, Refresh, Export HTML, Export Excel, Import Excel, **Settings**, theme
+  toggle, Close App. Pin state is remembered.
+- **Settings** (⚙) opens **Project Details** (now a dialog) and **BOM Settings**.
+- **Orders panel** is a compact **RFx + Description** list (plus the "(none)"
+  catch-all). Click a row and a **pop-up form** floats up over the list — PO,
+  Supplier, Delivery, Status (editable), order actions (Push Status → BOM, Clear
+  Notes, Delete), and the parts on that RFx — **while** the matching BOM lines
+  are spotlighted in the Tree (others dimmed, with a "Showing RFx…" banner).
+  **Back to list** (or **Esc**) deselects the RFx, closes the form, and clears
+  the spotlight. The parts section is a **collapsible** list with its own **Show
+  Included-in-Parent** toggle and a **Copy Parts** button that copies that one
+  RFx's parts list — **with all the default columns** — to the clipboard for
+  Excel. The panel collapses to a thin **Orders** handle; its state is
+  remembered, and it overlays the table on narrow screens.
 
 ## Bill of Materials
 
@@ -37,6 +67,9 @@ This log groups the work by area rather than by date.
   several values with OR matching, with a search box when the list is long and
   a Clear for the whole column); a show/hide columns menu; and "+ Add Column"
   to pull tree fields into the Flat view.
+- The **column header stays pinned** at the top while you scroll the BOM, and
+  now always sits above the rows — a cell being edited (e.g. the 3M Part Number
+  field) no longer bleeds over the header as its row scrolls underneath.
 - **Copy Table** (toolbar) copies the *visible* rows and columns — respecting
   collapse, search, filters, and hidden columns — to the clipboard as
   tab-separated text that pastes straight into Excel, with a confirmation
@@ -50,10 +83,12 @@ This log groups the work by area rather than by date.
   (read-only, derived from the RFx's order), Status, Notes, plus user-defined
   custom fields.
 - **Included in Parent** makes RFx/PO/Status read-only and inherited from the
-  parent assembly. A **Show Included-in-Parent** toggle (Flat view toolbar, and
-  on the Orders tab) reveals those normally-hidden lines — in Flat view they
-  join the aggregation; in an expanded order they appear under their effective
-  (inherited) RFx. Toggling it off restores the hidden state.
+  parent assembly. **Checking it writes the parent's effective RFx/PO/Status
+  into the line's own data** (previously those were only inherited for display),
+  so the stored values match the parent. A **Show Included-in-Parent** toggle
+  (Flat view toolbar, and in the Orders detail pop-up) reveals those
+  normally-hidden lines — in Flat view they join the aggregation; in an order's
+  parts list they appear under their effective (inherited) RFx.
 - **Row actions** consolidated into a 3-dots menu: Move Up/Down, **Move
   before…/after…**, Insert Above/Below, **Insert Rows…** (a dialog asks how
   many blank rows to drop in below the line), Add Sub-Item, Indent, Outdent,
@@ -82,7 +117,10 @@ This log groups the work by area rather than by date.
   shows a tooltip with its order details (PO, description, supplier, delivery,
   status), and focusing/clicking one fills a dedicated info panel above the
   table with the same details — so the rows stay clean. Works on inherited
-  (Included-in-Parent) RFx cells too.
+  (Included-in-Parent) RFx cells too. Each entry in the RFx dropdown also
+  carries its order's **Description** as hover text, so cryptic RFx codes are
+  identifiable while picking one. (Native dropdowns now follow the light/dark
+  theme via `color-scheme`, fixing the washed-out "inverse colors" popup.)
 - **Focus on one assembly:** assembly rows carry a small **filter icon** (next
   to the part number) — the Tree view collapses to just that assembly and its
   sub-parts, hiding siblings and parents. Item numbers keep their true path;
@@ -116,9 +154,14 @@ BOM part-number autocomplete.
 
 ## Orders
 
-- Full Orders tab: RFx, PO, Description, Supplier Name, Delivery Date, Status.
+- Full Orders tab: RFx, PO, Description, Supplier Name, Delivery Date, Status,
+  **Price**.
 - **Add Order** opens a form to enter all the order's details up front (RFx is
-  required), rather than dropping a blank row into the table.
+  required, Price optional), rather than dropping a blank row into the table.
+- **Price per order** — each order has an editable **Price ($)** field (in the
+  Add Order dialog and the order detail form), and the Orders panel shows a
+  running **Total Cost** (the sum of every order's price) below the list,
+  updating live as prices change. Price is included in the orders **Copy**.
 - **Expand an order to see and edit its parts:** a toggle on each order row
   reveals the BOM parts on that RFx (aggregated by 3M part number, with a
   "N parts · Qty X" summary) inline, no page reload. **RFx**, **Status** and
@@ -168,10 +211,11 @@ BOM part-number autocomplete.
   running **read-only** against the project's data embedded in the page — no
   server, database, or external requests, so it opens in any browser (even
   straight off disk). It looks and behaves like the live app — Tree/Flat views,
-  search, column sort and multi-select filters, expand/collapse (BOM and
-  Orders), the RFx info panel, per-order parts expansion, and Copy Table all
-  work — but every cell is static text and the editing controls are gone. Only
-  the **Bill of Materials** and **Orders** tabs are included.
+  search, filters, the BOM↔Orders spotlight, and Copy Table all work — but every
+  cell (and the order detail form) is static text. Controls that need the server
+  or editing are hidden (Refresh, Home, Settings, Import/Export, Close App, Add
+  Order, + Add Item); the **theme toggle** and panel collapse still work. The
+  **Bill of Materials** and **Orders** are included.
 
 ## Data storage & Excel connection
 
@@ -194,6 +238,17 @@ BOM part-number autocomplete.
 
 ## Running the app / infrastructure
 
+- **Batched saving (Save button).** Edits are now applied in memory and the
+  header shows **"Unsaved changes"** with the **Save** button enabled — nothing
+  is written to the server on every keystroke (that live-saving was the
+  slowdown). Persist with **Save** (or **Ctrl/Cmd+S**). Unsaved work is
+  auto-saved **every 15 minutes**, the browser **warns before you leave** with
+  unsaved changes, **Refresh** confirms before discarding them, and **Close App**
+  offers to save first.
+- **Refresh button** in the project header re-pulls the project's data from the
+  server and re-renders (keeping the current view, expand/collapse, and
+  selection) — a manual fix for seeing a stale copy when another session has
+  changed the data, since the page otherwise loads data only once.
 - `start-app.bat` launches the server windowless (no leftover console window)
   and opens the app; `stop-app.bat` stops it.
 - **Close App button** on every screen (project selector and project detail)

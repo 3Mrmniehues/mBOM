@@ -4,75 +4,89 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Project Detail</title>
+<link rel="icon" href="favicon.ico" sizes="any">
+<link rel="icon" type="image/png" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#1e3a8a">
+<script src="js/theme.js"></script>
 <link rel="stylesheet" href="css/styles.css">
 <link rel="stylesheet" href="css/project.css">
 </head>
 <body>
-<div class="page">
-  <a href="index.html" class="back-link">&larr; Back to Projects</a>
+<div id="notFound" class="empty-state" hidden>
+  <p>Project not found. <a href="index.html">&larr; Back to Projects</a></p>
+</div>
 
-  <div id="notFound" class="empty-state" hidden>
-    <p>Project not found.</p>
-  </div>
+<div id="projectContent" class="shell" hidden>
+  <!-- LEFT RAIL -->
+  <aside class="rail" id="rail">
+   <div class="rail-inner">
+    <div class="rail-top">
+      <button type="button" class="icon-btn rail-toggle" id="railToggle" title="Pin menu open">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+      </button>
+      <div class="rail-brand">mBOM</div>
+    </div>
+    <button type="button" class="rail-item" id="homeBtn" title="Back to Projects">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></svg>
+      <span class="label">Home</span>
+    </button>
+    <button type="button" class="rail-item" id="refreshBtn" title="Reload the latest data from the server (use if the data looks out of date)">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 4v5h-5"/></svg>
+      <span class="label">Refresh</span>
+    </button>
+    <div class="rail-sep"></div>
+    <button type="button" class="rail-item" id="exportHtmlBtn" title="Save a self-contained, read-only copy of this project (Bill of Materials + Orders) that runs in any browser">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 3v5h5"/><path d="M14 3H6v18h12V8z"/><path d="M8.5 13h2l1 2 1.5-4 1 2h1.5"/></svg>
+      <span class="label">Export HTML</span>
+    </button>
+    <button type="button" class="rail-item" id="exportExcelBtn" title="Export to Excel">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 3v5h5"/><path d="M14 3H6v18h12V8z"/><path d="m9 12 2 3-2 3m6-6-2 3 2 3"/></svg>
+      <span class="label">Export Excel</span>
+    </button>
+    <button type="button" class="rail-item" id="importExcelBtn" title="Import from Excel">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 15V3"/><path d="m7 10 5 5 5-5"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
+      <span class="label">Import Excel</span>
+    </button>
+    <div class="rail-spacer"></div>
+    <div class="rail-sep"></div>
+    <button type="button" class="rail-item" id="settingsBtn" title="Project Details &amp; BOM Settings">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg>
+      <span class="label">Settings</span>
+    </button>
+    <button type="button" class="rail-item" id="themeBtn" title="Toggle light / dark theme">
+      <span id="themeIco" style="display:flex"></span>
+      <span class="label" id="themeLabel">Theme</span>
+    </button>
+    <button type="button" class="rail-item danger" id="closeAppBtn" title="Stop the local server and close the app">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 4v8"/><path d="M6.3 7.3a8 8 0 1 0 11.4 0"/></svg>
+      <span class="label">Close App</span>
+    </button>
+   </div>
+  </aside>
 
-  <div id="projectContent" hidden>
-    <div class="detail-header">
-      <div>
+  <!-- MAIN COLUMN -->
+  <div class="main-col">
+    <header class="topbar">
+      <div class="title">
         <h1 id="projectTitle">&nbsp;</h1>
         <div class="meta" id="projectMeta"></div>
       </div>
-      <div class="header-actions">
-        <span class="save-indicator" id="saveIndicator">Saved</span>
-        <button type="button" class="export-btn secondary" id="importExcelBtn">Import from Excel</button>
-        <button type="button" class="export-btn secondary" id="exportHtmlBtn" title="Save a self-contained, read-only copy of this project (Bill of Materials + Orders) that runs in any browser">Export HTML</button>
-        <button type="button" class="export-btn" id="exportExcelBtn">Export to Excel</button>
-      </div>
-    </div>
+      <div class="spacer"></div>
+      <span class="save-indicator" id="saveIndicator">Saved</span>
+      <button type="button" class="btn" id="saveBtn" title="Save changes (Ctrl+S)" disabled>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg>
+        Save
+      </button>
+      <button type="button" class="btn" id="ordersToggle" title="Show / hide the Orders panel">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>
+        Orders
+      </button>
+    </header>
 
-    <div class="tabs">
-      <button type="button" class="tab-btn" data-tab="details">Project Details</button>
-      <button type="button" class="tab-btn active" data-tab="bom">Bill of Materials</button>
-      <button type="button" class="tab-btn" data-tab="orders">Orders</button>
-      <button type="button" class="tab-btn" data-tab="parts">Parts List</button>
-    </div>
-
-    <div class="tab-panel" id="tab-details">
-      <div class="details-card">
-        <form id="detailsForm" novalidate>
-          <div class="details-grid">
-            <div class="form-field">
-              <label for="detailWbs">WBS</label>
-              <input type="text" id="detailWbs" required>
-            </div>
-            <div class="form-field">
-              <label for="detailEwr">EWR</label>
-              <input type="text" id="detailEwr" required>
-            </div>
-            <div class="form-field full">
-              <label for="detailName">Project Name</label>
-              <input type="text" id="detailName" required>
-            </div>
-            <div class="form-field">
-              <label for="detailStatus">Status</label>
-              <select id="detailStatus" required>
-                <option value="Active">Active</option>
-                <option value="Archived">Archived</option>
-              </select>
-            </div>
-            <div class="form-field">
-              <label for="detailDateCreated">Date Created</label>
-              <input type="date" id="detailDateCreated" required>
-            </div>
-          </div>
-          <p class="form-error" id="detailsFormError" hidden></p>
-          <div class="details-actions">
-            <button type="submit" class="save-btn">Save Changes</button>
-          </div>
-        </form>
-      </div>
-    </div>
-
-    <div class="tab-panel active" id="tab-bom">
+    <div class="work">
+      <main class="bom-main" id="tab-bom">
       <div class="bom-toolbar">
         <div class="view-switch">
           <button type="button" class="active" data-view="tree">Tree View</button>
@@ -94,12 +108,12 @@
         <select class="add-col-select" id="addColumnSelect">
           <option value="">+ Add Column</option>
         </select>
-        <button type="button" class="tool-btn" id="bomSettingsBtn">BOM Settings</button>
         <button type="button" class="tool-btn primary" id="addRootItemBtn">+ Add Top-Level Item</button>
       </div>
 
       <div class="assembly-filter-banner" id="assemblyFilterBanner" hidden>
         <span id="assemblyFilterLabel"></span>
+        <button type="button" class="tool-btn" id="assemblyFilterUpBtn" title="Focus the parent assembly">↑ Up to Parent</button>
         <button type="button" class="tool-btn" id="clearAssemblyFilterBtn">Clear filter (Esc)</button>
       </div>
 
@@ -119,6 +133,13 @@
         <button type="button" class="rfx-info-close" id="rfxInfoCloseBtn" title="Dismiss" aria-label="Dismiss">×</button>
       </div>
 
+      <div class="bom-filter-banner" id="bomFilterBanner" hidden>
+        <span>Showing BOM parts on RFx <b id="bomFilterRfx"></b></span>
+        <span class="count" id="bomFilterCount" style="color:var(--color-text-muted)"></span>
+        <div class="spacer"></div>
+        <button type="button" class="link" id="bomFilterClear">Clear filter &#10005;</button>
+      </div>
+
       <div class="bom-table-wrap">
         <table class="bom-grid" id="bomTable">
           <colgroup id="bomColgroup"></colgroup>
@@ -127,59 +148,86 @@
         </table>
       </div>
       <div class="bom-empty" id="bomEmpty" hidden>No BOM items yet. Use "+ Add Top-Level Item" to start.</div>
-    </div>
+      </main>
 
-    <div class="tab-panel" id="tab-orders">
-      <div class="bom-toolbar">
-        <button type="button" class="tool-btn primary" id="addOrderBtn">+ Add Order</button>
-        <div class="spacer"></div>
-        <button type="button" class="tool-btn" id="expandAllOrdersBtn" title="Show every order's parts">Expand All</button>
-        <button type="button" class="tool-btn" id="collapseAllOrdersBtn" title="Hide every order's parts">Collapse All</button>
-        <button type="button" class="tool-btn" id="showIncludedOrdersBtn" title="Show or hide &quot;Included in Parent&quot; components in the expanded parts lists">Show Included-in-Parent</button>
-        <button type="button" class="tool-btn" id="copyOrdersBtn" title="Copy the visible table to the clipboard (paste into Excel)">Copy Table</button>
-      </div>
-      <div class="bom-table-wrap">
-        <table class="bom-grid" id="ordersTable">
-          <colgroup>
-            <col style="width:130px"><col style="width:130px"><col style="width:220px">
-            <col style="width:160px"><col style="width:130px"><col style="width:130px">
-            <col style="width:70px">
-          </colgroup>
-          <thead id="ordersThead"></thead>
-          <tbody id="ordersTbody"></tbody>
-        </table>
-      </div>
-      <div class="bom-empty" id="ordersEmpty" hidden>No orders yet. Use "+ Add Order" to start.</div>
-      <p class="import-help">
-        These RFx and PO values populate the RFx and PO fields on the Bill of Materials tab —
-        a BOM line's PO is read from the order whose RFx it matches. Use an order's
-        <strong>Update Status</strong> action to push its status onto every BOM part on that RFx.
-      </p>
-    </div>
-
-    <div class="tab-panel" id="tab-parts">
-      <div class="bom-toolbar">
-        <input type="search" id="partsSearch" placeholder="Search parts...">
-        <div class="spacer"></div>
-        <button type="button" class="tool-btn primary" id="addPartBtn">+ Add Part</button>
-      </div>
-      <div class="bom-table-wrap">
-        <table class="bom-grid" id="partsTable">
-          <colgroup id="partsColgroup"></colgroup>
-          <thead id="partsThead"></thead>
-          <tbody id="partsTbody"></tbody>
-        </table>
-      </div>
-      <div class="bom-empty" id="partsEmpty" hidden>No parts yet. Parts appear here automatically as you build the BOM, or use "+ Add Part" to enter one manually.</div>
-      <p class="import-help">
-        This catalog stays in sync with the Bill of Materials — every part you use there is
-        added here automatically. Parts you add manually are kept even if they're not in the
-        BOM. When you type a 3M Part Number on the BOM tab, matches from this list are
-        suggested for autocomplete; assemblies also remember their child components.
-      </p>
+      <!-- ORDERS PANEL -->
+      <aside class="orders-panel" id="ordersPanel">
+        <div class="orders-list" id="ordersListView">
+          <div class="orders-head">
+            <b>Orders</b> <span class="count" id="ordersCount"></span>
+            <div class="spacer" style="flex:1"></div>
+            <button type="button" class="icon-btn" id="ordersPanelClose" title="Collapse panel">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 6 6 6-6 6"/></svg>
+            </button>
+          </div>
+          <div class="orders-scroll">
+            <table class="orders-compact">
+              <thead><tr><th>RFx</th><th>Description</th></tr></thead>
+              <tbody id="ordersTbody"></tbody>
+            </table>
+            <div class="bom-empty" id="ordersEmpty" hidden>No orders yet. Use "+ Add Order" to start.</div>
+          </div>
+          <div class="orders-total-bar"><span class="orders-total" id="ordersTotalCost">Total: $0.00</span></div>
+          <div class="orders-foot">
+            <button type="button" class="tool-btn primary" id="addOrderBtn">+ Add Order</button>
+            <button type="button" class="tool-btn" id="copyOrdersBtn" title="Copy orders + their parts to the clipboard (paste into Excel)">Copy</button>
+          </div>
+        </div>
+        <div class="orders-detail" id="ordersDetailView" hidden>
+          <div class="orders-detail-head">
+            <button type="button" class="back-to-list" id="orderDetailBack" title="Deselect this RFx and return to the list (Esc)">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg>
+              Back to list
+            </button>
+            <div class="spacer"></div>
+            <b id="orderDetailTitle">Order</b>
+          </div>
+          <div class="orders-detail-body" id="orderDetailBody"></div>
+        </div>
+      </aside>
     </div>
   </div>
 </div>
+
+<div class="orders-handle" id="ordersHandle" hidden>ORDERS</div>
+
+<dialog id="detailsDialog">
+  <div class="settings-body">
+    <h2>Project Details</h2>
+    <form id="detailsForm" novalidate>
+      <div class="details-grid">
+        <div class="form-field">
+          <label for="detailWbs">WBS</label>
+          <input type="text" id="detailWbs">
+        </div>
+        <div class="form-field">
+          <label for="detailEwr">EWR</label>
+          <input type="text" id="detailEwr">
+        </div>
+        <div class="form-field full">
+          <label for="detailName">Project Name</label>
+          <input type="text" id="detailName" required>
+        </div>
+        <div class="form-field">
+          <label for="detailStatus">Status</label>
+          <select id="detailStatus">
+            <option value="Active">Active</option>
+            <option value="Archived">Archived</option>
+          </select>
+        </div>
+        <div class="form-field">
+          <label for="detailDateCreated">Date Created</label>
+          <input type="date" id="detailDateCreated">
+        </div>
+      </div>
+      <p class="form-error" id="detailsFormError" hidden></p>
+      <div class="details-actions">
+        <button type="button" class="tool-btn" id="detailsCancelBtn">Close</button>
+        <button type="submit" class="save-btn">Save Changes</button>
+      </div>
+    </form>
+  </div>
+</dialog>
 
 <dialog id="bomSettingsDialog">
   <div class="settings-body">
@@ -291,6 +339,10 @@
           <label for="orderDelivery">Delivery Date</label>
           <input type="date" id="orderDelivery">
         </div>
+        <div class="form-field">
+          <label for="orderPrice">Price ($)</label>
+          <input type="number" id="orderPrice" min="0" step="0.01" placeholder="0.00">
+        </div>
         <div class="form-field full">
           <label for="orderStatus">Status</label>
           <select id="orderStatus"></select>
@@ -323,5 +375,6 @@
 
 <script src="js/store.js"></script>
 <script src="js/project.js"></script>
+<script src="js/close-app.js"></script>
 </body>
 </html>
