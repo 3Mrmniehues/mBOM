@@ -14,7 +14,13 @@
   if (!btn) return;
 
   btn.addEventListener("click", function () {
-    if (!window.confirm("Close mBOM? This stops the local server.")) return;
+    // If there are unsaved changes, offer to save before the server stops.
+    var hasUnsaved = window.mbomSaveState && typeof window.mbomSaveState.isDirty === "function" && window.mbomSaveState.isDirty();
+    var msg = hasUnsaved
+      ? "You have unsaved changes. Save and close mBOM? (Cancel keeps the app open.)"
+      : "Close mBOM? This stops the local server.";
+    if (!window.confirm(msg)) return;
+    if (hasUnsaved) { try { window.mbomSaveState.save(); } catch (e) {} }
     btn.disabled = true;
 
     // Ask the server to stop. keepalive lets the request finish even while the
