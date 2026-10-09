@@ -69,65 +69,22 @@
   const detailDateCreated = document.getElementById("detailDateCreated");
 
   function populateDetailsForm() {
-    detailWbs.value = project.wbs || "";
-    detailEwr.value = project.ewr || "";
-    detailName.value = project.name || "";
-    detailStatus.value = project.status || "Active";
-    detailDateCreated.value = project.dateCreated || "";
-    projectTitle.textContent = project.name || "(untitled project)";
-    const bits = [];
-    if ((project.wbs || "").trim()) bits.push("WBS " + project.wbs);
-    if ((project.ewr || "").trim()) bits.push("EWR " + project.ewr);
-    projectMeta.textContent = bits.join(" · ");
-    document.title = (project.name || "Project") + " — Project Detail";
+    detailWbs.value = project.wbs;
+    detailEwr.value = project.ewr;
+    detailName.value = project.name;
+    detailStatus.value = project.status;
+    detailDateCreated.value = project.dateCreated;
+    projectTitle.textContent = project.name;
+    projectMeta.textContent = "WBS " + project.wbs + " · EWR " + project.ewr;
+    document.title = project.name + " — Project Detail";
   }
 
-  // ---------- Unsaved-changes tracking + manual / auto save ----------
-  // Edits are applied in memory and flagged dirty; persisting to the server
-  // happens on the Save button, every 15 minutes, and is guarded on unload —
-  // not on every keystroke (that live-saving was the slowdown).
-  let dirty = false;
-  const saveBtn = document.getElementById("saveBtn");
-  function updateSaveUi() {
-    if (saveIndicator) {
-      saveIndicator.textContent = dirty ? "Unsaved changes" : "Saved";
-      saveIndicator.classList.toggle("unsaved", dirty);
-    }
-    if (saveBtn) {
-      saveBtn.disabled = !dirty;
-      saveBtn.classList.toggle("primary", dirty);
-    }
+  let saveIndicatorTimer = null;
+  function flashSaveIndicator() {
+    saveIndicator.classList.add("visible");
+    clearTimeout(saveIndicatorTimer);
+    saveIndicatorTimer = setTimeout(() => saveIndicator.classList.remove("visible"), 1800);
   }
-  function markDirty() { dirty = true; updateSaveUi(); }
-  // Back-compat: edit handlers call flashSaveIndicator() right after an edit —
-  // that now just flags unsaved changes instead of persisting.
-  function flashSaveIndicator() { markDirty(); }
-  function saveAll() {
-    Store.saveBom(project.id, tree);
-    Store.saveOrders(project.id, orders);
-    Store.saveParts(project.id, parts);
-    Store.saveStatusOptions(statusOptions);
-    Store.saveCustomFields(customFields);
-    dirty = false;
-    updateSaveUi();
-    showToast("Saved");
-  }
-  if (saveBtn) saveBtn.addEventListener("click", saveAll);
-  // Ctrl/Cmd+S saves.
-  document.addEventListener("keydown", (e) => {
-    if ((e.ctrlKey || e.metaKey) && (e.key === "s" || e.key === "S")) {
-      e.preventDefault();
-      if (dirty) saveAll();
-    }
-  });
-  // Warn before leaving (close, Home, reload) with unsaved changes.
-  window.addEventListener("beforeunload", (e) => {
-    if (dirty) { e.preventDefault(); e.returnValue = ""; return ""; }
-  });
-  // Auto-save every 15 minutes if there are unsaved changes.
-  setInterval(() => { if (dirty) saveAll(); }, 15 * 60 * 1000);
-  // Let close-app.js (separate file) check/flush unsaved changes on Close App.
-  window.mbomSaveState = { isDirty: () => dirty, save: saveAll };
 
   // ---------- Copy the visible table to the clipboard (TSV → Excel) ----------
   let toastTimer = null;
@@ -298,9 +255,8 @@
     const status = detailStatus.value;
     const dateCreated = detailDateCreated.value;
 
-    // Only enforce WBS uniqueness when a WBS was entered — it's optional now.
-    const duplicate = wbs && Store.getProjects().some(
-      (p) => p.id !== project.id && (p.wbs || "").toLowerCase() === wbs.toLowerCase()
+    const duplicate = Store.getProjects().some(
+      (p) => p.id !== project.id && p.wbs.toLowerCase() === wbs.toLowerCase()
     );
     if (duplicate) {
       detailsFormError.textContent = "A project with WBS \"" + wbs + "\" already exists.";
@@ -311,9 +267,7 @@
     Object.assign(project, { wbs, ewr, name, status, dateCreated });
     Store.updateProject(project.id, { wbs, ewr, name, status, dateCreated });
     populateDetailsForm();
-    showToast("Project details saved");
-    const dlg = document.getElementById("detailsDialog");
-    if (dlg && dlg.open) dlg.close();
+    flashSaveIndicator();
   });
 
   // ---------- BOM state ----------
@@ -573,7 +527,7 @@
   // they need to (e.g. persistAndRender).
   function saveBomTree() {
     syncPartsFromBom();
-    markDirty(); // persisted by saveAll (Save button / autosave), not live
+    Store.saveBom(project.id, tree);
   }
 
   function persistAndRender() {
@@ -1073,23 +1027,8 @@
       input.addEventListener("change", () => {
         setNodeValue(node, col, input.checked, trEl);
         // Toggling this flips RFx/PO/Status between editable and inherited.
-        if (col.key === "includedInParent") {
-          // Checking it writes the parent's effective RFx/PO/Status into this
-          // line's own data (previously those were only inherited for display),
-          // so the stored values match the parent.
-          if (input.checked) {
-            const pm = buildParentMap(tree, null);
-            const parent = pm.get(node.guid);
-            if (parent) {
-              const info = resolveOrderInfo(parent, pm);
-              node.rfx = info.rfx;
-              node.po = lookupPoForRfx(info.rfx);
-              node.status = info.status;
-              saveBomTree();
-            }
-          }
-          renderBom();
-        } else if (isConflictField(col.key)) refreshConflictHighlights();
+        if (col.key === "includedInParent") renderBom();
+        else if (isConflictField(col.key)) refreshConflictHighlights();
       });
       td.appendChild(input);
       return td;
@@ -1101,16 +1040,7 @@
         : (col.options || []);
       const select = el("select", { class: "cell-select" });
       select.appendChild(el("option", { value: "", text: "(none)" }));
-      options.forEach((opt) => {
-        const o = el("option", { value: opt, text: opt });
-        // RFx codes are cryptic, so each option carries its order's Description
-        // as hover text (and the whole cell's tooltip shows it too, below).
-        if (col.key === "rfx") {
-          const desc = ((getOrderForRfx(opt) || {}).description || "").trim();
-          if (desc) o.title = opt + " — " + desc;
-        }
-        select.appendChild(o);
-      });
+      options.forEach((opt) => select.appendChild(el("option", { value: opt, text: opt })));
       // Keep a value that's no longer in the option list visible (e.g. a
       // status saved before the options were changed) rather than silently
       // showing it as blank.
@@ -1489,7 +1419,6 @@
       tr.appendChild(toggleTd);
 
       const info = resolveOrderInfo(node, parentMap);
-      tr.dataset.rfx = (info.rfx || "").trim(); // for the Orders-panel BOM highlight
       cols.forEach((c, ci) => {
         let cell;
         if (c.key === "itemNo") {
@@ -1912,16 +1841,7 @@
         : (col.options || []);
       const select = el("select", { class: "cell-select" });
       select.appendChild(el("option", { value: "", text: "(none)" }));
-      options.forEach((opt) => {
-        const o = el("option", { value: opt, text: opt });
-        // RFx codes are cryptic, so each option carries its order's Description
-        // as hover text (and the whole cell's tooltip shows it too, below).
-        if (col.key === "rfx") {
-          const desc = ((getOrderForRfx(opt) || {}).description || "").trim();
-          if (desc) o.title = opt + " — " + desc;
-        }
-        select.appendChild(o);
-      });
+      options.forEach((opt) => select.appendChild(el("option", { value: opt, text: opt })));
       if (rawValue && options.indexOf(rawValue) === -1) {
         select.appendChild(el("option", { value: rawValue, text: rawValue + " (legacy)" }));
       }
@@ -2606,7 +2526,6 @@
     if (!isTree) hideRfxInfo(); // the RFx info panel is a Tree-view aid
     updateAssemblyFilterBanner();
     updateSelectionBar();
-    if (typeof applyBomHighlight === "function") applyBomHighlight(); // re-apply Orders-panel spotlight
   }
 
   if (assemblyFilterBanner) {
@@ -2720,7 +2639,7 @@
       return;
     }
     statusOptions.splice(idx, 1);
-    markDirty();
+    Store.saveStatusOptions(statusOptions);
     renderSettingsDialog();
     renderBom();
   }
@@ -2733,7 +2652,7 @@
       return;
     }
     statusOptions.push(val);
-    markDirty();
+    Store.saveStatusOptions(statusOptions);
     newStatusOption.value = "";
     renderSettingsDialog();
     renderBom();
@@ -2777,7 +2696,7 @@
     }
 
     customFields.push(field);
-    markDirty();
+    Store.saveCustomFields(customFields);
     newFieldName.value = "";
     newFieldChoices.value = "";
     newFieldChoices.hidden = true;
@@ -2789,7 +2708,7 @@
   function removeCustomField(idx) {
     const removedKey = "custom:" + customFields[idx].key;
     customFields.splice(idx, 1);
-    markDirty();
+    Store.saveCustomFields(customFields);
 
     const groupedList = Object.keys(groupedViews).map((k) => groupedViews[k]);
     [flatExtraColumns].concat(groupedList.map((gv) => gv.extraColumns)).forEach((list) => {
@@ -2813,11 +2732,10 @@
     renderBom();
   }
 
-  function openBomSettings() {
+  bomSettingsBtn.addEventListener("click", () => {
     renderSettingsDialog();
     bomSettingsDialog.showModal();
-  }
-  if (bomSettingsBtn) bomSettingsBtn.addEventListener("click", openBomSettings);
+  });
   closeSettingsBtn.addEventListener("click", () => bomSettingsDialog.close());
   bomSettingsDialog.addEventListener("click", (e) => {
     if (e.target === bomSettingsDialog) bomSettingsDialog.close();
@@ -2950,28 +2868,9 @@
     { key: "supplierName", label: "Supplier Name" },
     { key: "deliveryDate", label: "Delivery Date" },
     { key: "status", label: "Status" },
-    { key: "price", label: "Price" },
   ];
-
-  // Sum of every order's Price, formatted as currency.
-  function formatCurrency(n) {
-    return "$" + (Number(n) || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  }
-  function ordersTotalCost() {
-    return orders.reduce((s, o) => s + (Number(o.price) || 0), 0);
-  }
   const orderSortState = { key: null, dir: "asc" };
   const orderColumnFilters = {};
-  let orderSearchQuery = "";
-
-  // Columns shown in the compact Orders list — each one is click-to-sort and
-  // has a filter funnel in its header. (The full field set lives in
-  // ORDER_COLUMNS, which the free-text search below spans and the Copy uses.)
-  const ORDER_DISPLAY_COLUMNS = [
-    { key: "rfx", label: "RFx", cls: "oc-rfx" },
-    { key: "status", label: "Status", cls: "oc-status" },
-    { key: "description", label: "Description", cls: "oc-desc" },
-  ];
 
   function orderCellText(order, key) {
     const v = order[key];
@@ -3004,15 +2903,6 @@
       );
     }
 
-    // Free-text search spans every order field (RFx, PO, Description, Supplier,
-    // Delivery Date, Status, Price), case-insensitive substring match.
-    const q = orderSearchQuery.trim().toLowerCase();
-    if (q) {
-      list = list.filter((o) =>
-        ORDER_COLUMNS.some((c) => orderCellText(o, c.key).toLowerCase().indexOf(q) !== -1)
-      );
-    }
-
     if (orderSortState.key) {
       const key = orderSortState.key;
       const dir = orderSortState.dir === "asc" ? 1 : -1;
@@ -3029,66 +2919,40 @@
     return list;
   }
 
-  // Click a column to sort by it: 1st click ascending, 2nd descending, 3rd off.
-  function toggleOrderSort(key) {
-    if (orderSortState.key !== key) {
-      orderSortState.key = key;
-      orderSortState.dir = "asc";
-    } else if (orderSortState.dir === "asc") {
-      orderSortState.dir = "desc";
-    } else {
-      orderSortState.key = null;
-      orderSortState.dir = "asc";
-    }
-    renderOrders();
-  }
-
-  // Compact Orders header: each column is click-to-sort (with an arrow) and
-  // carries a filter funnel that opens the shared multi-select dropdown.
   function renderOrdersHeader() {
-    if (!ordersThead) return;
     ordersThead.innerHTML = "";
-    const row = el("tr");
-    ORDER_DISPLAY_COLUMNS.forEach((c) => {
-      const th = el("th", { class: "oc-th " + c.cls });
-      const inner = el("div", { class: "oc-th-inner" });
 
-      const sorted = orderSortState.key === c.key;
-      const sortBtn = el("button", {
-        type: "button",
-        class: "oc-sort" + (sorted ? " active" : ""),
-        title: "Sort by " + c.label,
+    const headRow = el("tr");
+    ORDER_COLUMNS.forEach((c) => {
+      const arrow = orderSortState.key === c.key ? (orderSortState.dir === "asc" ? " ▲" : " ▼") : "";
+      const th = el("th", { class: "sortable" }, [el("span", { class: "th-label", text: c.label + arrow })]);
+      th.addEventListener("click", () => {
+        if (orderSortState.key === c.key) orderSortState.dir = orderSortState.dir === "asc" ? "desc" : "asc";
+        else {
+          orderSortState.key = c.key;
+          orderSortState.dir = "asc";
+        }
+        renderOrders();
       });
-      sortBtn.appendChild(el("span", { class: "oc-sort-label", text: c.label }));
-      sortBtn.appendChild(el("span", {
-        class: "oc-sort-arrow",
-        text: sorted ? (orderSortState.dir === "asc" ? "▲" : "▼") : "",
-      }));
-      sortBtn.addEventListener("click", () => toggleOrderSort(c.key));
-      inner.appendChild(sortBtn);
-
-      const selected = getFilterSelected(orderColumnFilters, c.key);
-      const funnel = el("button", {
-        type: "button",
-        class: "oc-funnel" + (selected.length ? " active" : ""),
-        title: selected.length ? "Filtered: " + selected.join(", ") : "Filter " + c.label,
-      });
-      funnel.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/></svg>';
-      funnel.addEventListener("click", (e) => {
-        e.stopPropagation();
-        if (openFilterPanel && openFilterPanel._anchor === funnel) { closeFilterPanel(); return; }
-        openFilterDropdown(funnel, orderDistinctValues(c.key), selected, renderOrders);
-      });
-      inner.appendChild(funnel);
-
-      th.appendChild(inner);
-      row.appendChild(th);
+      headRow.appendChild(th);
     });
-    ordersThead.appendChild(row);
+    if (!READONLY) headRow.appendChild(el("th", {}, [el("span", { class: "th-label", text: "Actions" })]));
+    ordersThead.appendChild(headRow);
+
+    const filterRow = el("tr", { class: "filter-row" });
+    ORDER_COLUMNS.forEach((c) => {
+      const td = el("td");
+      const selected = getFilterSelected(orderColumnFilters, c.key);
+      td.appendChild(buildFilterControl(orderDistinctValues(c.key), selected, renderOrders));
+      filterRow.appendChild(td);
+    });
+    if (!READONLY) filterRow.appendChild(el("td")); // Actions column has no filter
+    ordersThead.appendChild(filterRow);
   }
 
   function saveOrders() {
-    markDirty(); // persisted by saveAll, not live
+    Store.saveOrders(project.id, orders);
+    flashSaveIndicator();
   }
 
   // Applies an order's status to every BOM line on that RFx. Lines flagged
@@ -3337,303 +3201,118 @@
     return tr;
   }
 
-  // ---------- Orders panel (compact RFx + Description -> detail form) ----------
-  const ordersCountEl = document.getElementById("ordersCount");
-  const ordersTotalCostEl = document.getElementById("ordersTotalCost");
-  const ordersSearchInput = document.getElementById("ordersSearch");
-  const ordersClearBtn = document.getElementById("ordersClearFilters");
-  if (ordersSearchInput) {
-    ordersSearchInput.addEventListener("input", () => {
-      orderSearchQuery = ordersSearchInput.value;
-      renderOrders();
-    });
-  }
-  if (ordersClearBtn) {
-    ordersClearBtn.addEventListener("click", () => {
-      orderSearchQuery = "";
-      if (ordersSearchInput) ordersSearchInput.value = "";
-      Object.keys(orderColumnFilters).forEach((k) => delete orderColumnFilters[k]);
-      orderSortState.key = null;
-      orderSortState.dir = "asc";
-      renderOrders();
-    });
-  }
-  const ordersListView = document.getElementById("ordersListView");
-  const ordersDetailView = document.getElementById("ordersDetailView");
-  const orderDetailTitle = document.getElementById("orderDetailTitle");
-  const orderDetailBody = document.getElementById("orderDetailBody");
-  const orderDetailBack = document.getElementById("orderDetailBack");
-  const bomTableEl = document.getElementById("bomTable");
-  const bomFilterBanner = document.getElementById("bomFilterBanner");
-  const bomFilterRfx = document.getElementById("bomFilterRfx");
-  const bomFilterCount = document.getElementById("bomFilterCount");
-
-  // The order whose parts are spotlighted in the BOM (its bucket object for the
-  // "(none)" row), or null. Re-applied after each BOM render.
-  let activeOrder = null;
-  let orderPartsCollapsed = false; // collapse state of the detail's parts section
-  function applyBomHighlight() {
-    if (!bomTbody) return;
-    if (!activeOrder) {
-      if (bomTableEl) bomTableEl.classList.remove("bom-filtering");
-      Array.from(bomTbody.querySelectorAll("tr.bom-hl")).forEach((tr) => tr.classList.remove("bom-hl"));
-      if (bomFilterBanner) bomFilterBanner.hidden = true;
-      return;
-    }
-    const isNone = !!activeOrder.__noneBucket;
-    const rfx = isNone ? "" : (activeOrder.rfx || "").trim();
-    // Row dimming/highlight only makes sense in the Tree view (one line per row).
-    if (currentView === "tree") {
-      Array.from(bomTbody.querySelectorAll("tr[data-guid]")).forEach((tr) =>
-        tr.classList.toggle("bom-hl", (tr.dataset.rfx || "") === rfx)
-      );
-      if (bomTableEl) bomTableEl.classList.add("bom-filtering");
-    } else {
-      if (bomTableEl) bomTableEl.classList.remove("bom-filtering");
-      Array.from(bomTbody.querySelectorAll("tr.bom-hl")).forEach((tr) => tr.classList.remove("bom-hl"));
-    }
-    const n = orderParts(activeOrder).length;
-    if (bomFilterRfx) bomFilterRfx.textContent = isNone ? "(none)" : (rfx || "(no RFx)");
-    if (bomFilterCount) bomFilterCount.textContent = "· " + n + " part" + (n === 1 ? "" : "s");
-    if (bomFilterBanner) bomFilterBanner.hidden = false;
-  }
-  function clearBomHighlight() { activeOrder = null; applyBomHighlight(); }
-  const bomFilterClear = document.getElementById("bomFilterClear");
-  if (bomFilterClear) bomFilterClear.addEventListener("click", () => closeOrderDetail());
-
-  function ordersAnyFilterActive() {
-    return activeFilterKeys(orderColumnFilters).length > 0 ||
-      orderSearchQuery.trim() !== "" ||
-      !!orderSortState.key;
-  }
-  function updateOrdersClearBtn() {
-    if (ordersClearBtn) ordersClearBtn.hidden = !ordersAnyFilterActive();
-  }
-
   function renderOrders() {
     refreshIncludedToggleButton(showIncludedOrdersBtn);
     renderOrdersHeader();
     ordersTbody.innerHTML = "";
-    const visible = getVisibleOrders();
-    const noneParts = unassignedParts();
-    // The synthetic "(none)" bucket isn't a real order, so hide it whenever a
-    // search/filter is narrowing the list (it has nothing to match against).
-    const narrowing = activeFilterKeys(orderColumnFilters).length > 0 || orderSearchQuery.trim() !== "";
-    const showNone = noneParts.length > 0 && !narrowing;
-    const total = visible.length + (showNone ? 1 : 0);
-    if (ordersCountEl) ordersCountEl.textContent = total + " RFx";
-    if (ordersTotalCostEl) ordersTotalCostEl.textContent = "Total: " + formatCurrency(ordersTotalCost());
 
-    if (!total) {
+    const visible = getVisibleOrders();
+    // The "(none)" catch-all shows whenever any BOM item lacks an RFx, so the
+    // table isn't "empty" while unassigned items exist.
+    const showNone = unassignedParts().length > 0;
+    if (orders.length === 0 && !showNone) {
       ordersEmpty.hidden = false;
-      ordersEmpty.textContent = orders.length === 0
-        ? "No orders yet. Use \"+ Add Order\" to start."
-        : "No orders match your search or filters.";
+      ordersEmpty.textContent = "No orders yet. Use \"+ Add Order\" to start.";
+    } else if (visible.length === 0 && !showNone) {
+      ordersEmpty.hidden = false;
+      ordersEmpty.textContent = "No orders match the current filters.";
     } else {
       ordersEmpty.hidden = true;
     }
 
-    const addRow = (order, isNone) => {
+    visible.forEach((order) => {
       const tr = el("tr");
-      if (isNone) tr.classList.add("none-row");
-      tr.appendChild(el("td", { class: "oc-rfx", text: isNone ? "(none)" : ((order.rfx || "").trim() || "(no RFx)") }));
-      tr.appendChild(el("td", { class: "oc-status", text: isNone ? "" : (order.status || "") }));
-      tr.appendChild(el("td", { class: "oc-desc", text: isNone ? "BOM items with no RFx assigned" : (order.description || "") }));
-      tr.addEventListener("click", () => openOrderDetail(order, isNone));
-      ordersTbody.appendChild(tr);
-    };
-    visible.forEach((o) => addRow(o, false));
-    if (showNone) addRow(noneBucketOrder(), true);
 
-    updateOrdersClearBtn();
-    if (activeOrder) applyBomHighlight(); // keep a open detail's highlight in sync
-  }
-
-  function closeOrderDetail() {
-    // The detail is a floating pop-up over the list, so deselecting just hides
-    // it and clears the BOM spotlight; the list is always present underneath.
-    if (ordersDetailView) ordersDetailView.hidden = true;
-    clearBomHighlight();
-  }
-  if (orderDetailBack) orderDetailBack.addEventListener("click", closeOrderDetail);
-  // Esc deselects the open order (when no dialog/menu is claiming Esc).
-  document.addEventListener("keydown", (e) => {
-    if (e.key !== "Escape") return;
-    if (ordersDetailView && !ordersDetailView.hidden && !document.querySelector("dialog[open]") && !openMenu) {
-      closeOrderDetail();
-    }
-  });
-
-  function orderDetailField(label, order, field, inputType) {
-    const wrap = el("div", { class: "odf" });
-    wrap.appendChild(el("label", { text: label }));
-    const empty = order[field] == null || order[field] === "";
-    if (READONLY) {
-      const txt = field === "price" ? (empty ? "—" : formatCurrency(order[field])) : (empty ? "—" : String(order[field]));
-      wrap.appendChild(el("div", { class: "odf-readonly", text: txt }));
-      return wrap;
-    }
-    const input = el("input", { type: inputType || "text" });
-    if (inputType === "number") { input.step = "0.01"; input.min = "0"; }
-    input.value = order[field] == null ? "" : order[field];
-    input.addEventListener("change", () => {
-      const oldVal = (order[field] || "").toString().trim();
-      const newVal = inputType === "number" ? (input.value === "" ? "" : Number(input.value))
-        : inputType === "date" ? input.value
-        : input.value.trim();
-      order[field] = newVal;
-      saveOrders();
-      if (field === "rfx" && oldVal && newVal && oldVal !== newVal) propagateRfxChange(oldVal, newVal);
-      if (field === "rfx" || field === "po" || field === "deliveryDate" || field === "status") renderBom();
-      renderOrders();
-      if (field === "rfx" && orderDetailTitle) {
-        orderDetailTitle.textContent = order.rfx || "(no RFx)";
-        applyBomHighlight();
-      }
-    });
-    wrap.appendChild(input);
-    return wrap;
-  }
-  function orderStatusField(order) {
-    const wrap = el("div", { class: "odf" });
-    wrap.appendChild(el("label", { text: "Status" }));
-    if (READONLY) {
-      wrap.appendChild(el("div", { class: "odf-readonly", text: order.status || "—" }));
-      return wrap;
-    }
-    const sel = el("select");
-    sel.appendChild(el("option", { value: "", text: "(none)" }));
-    statusOptions.forEach((o) => sel.appendChild(el("option", { value: o, text: o })));
-    if (order.status && statusOptions.indexOf(order.status) === -1) {
-      sel.appendChild(el("option", { value: order.status, text: order.status + " (legacy)" }));
-    }
-    sel.value = order.status || "";
-    sel.addEventListener("change", () => { order.status = sel.value; saveOrders(); renderBom(); renderOrders(); });
-    wrap.appendChild(sel);
-    return wrap;
-  }
-
-  // Copy one RFx's parts list to the clipboard with all the default (Flat)
-  // columns, as tab-separated text for Excel.
-  function copyRfxParts(order, label) {
-    const cols = getExportAggregateColumns(FLAT_EXCLUDED_KEYS);
-    const parts = orderParts(order);
-    const clean = (v) => (v == null ? "" : String(v)).replace(/[\t\r\n]+/g, " ").trim();
-    const lines = [cols.map((c) => c.label).join("\t")];
-    parts.forEach((r) => {
-      lines.push(cols.map((c) => {
-        let v = getExportFieldValue(r, c);
-        if (c.type === "checkbox") v = v === "X" ? "X" : "";
-        return clean(v);
-      }).join("\t"));
-    });
-    writeClipboardText(lines.join("\n")).then(() =>
-      showToast("Copied " + parts.length + " part" + (parts.length === 1 ? "" : "s") + " for RFx " + label));
-  }
-
-  function openOrderDetail(order, isNone) {
-    activeOrder = order;
-    applyBomHighlight();
-    if (orderDetailTitle) orderDetailTitle.textContent = isNone ? "(none) — unassigned" : ((order.rfx || "").trim() || "(no RFx)");
-    orderDetailBody.innerHTML = "";
-
-    if (!isNone) {
-      orderDetailBody.appendChild(orderDetailField("RFx", order, "rfx"));
-      orderDetailBody.appendChild(orderDetailField("PO", order, "po"));
-      orderDetailBody.appendChild(orderDetailField("Description", order, "description"));
-      orderDetailBody.appendChild(orderDetailField("Supplier Name", order, "supplierName"));
-      orderDetailBody.appendChild(orderDetailField("Delivery Date", order, "deliveryDate", "date"));
-      orderDetailBody.appendChild(orderDetailField("Price ($)", order, "price", "number"));
-      orderDetailBody.appendChild(orderStatusField(order));
-      if (!READONLY) {
-      const actions = el("div", { class: "odf-actions" });
-      const updBtn = el("button", { class: "tool-btn", type: "button", text: "Push Status → BOM" });
-      updBtn.addEventListener("click", () => applyOrderStatusToBom(order));
-      const clrBtn = el("button", { class: "tool-btn", type: "button", text: "Clear Notes" });
-      clrBtn.addEventListener("click", () => clearNotesOnAggregates(orderParts(order), (order.rfx || "").trim() || "(no RFx)"));
-      const delBtn = el("button", { class: "tool-btn danger", type: "button", text: "Delete Order" });
-      delBtn.addEventListener("click", () => {
-        if (!window.confirm("Delete this order?")) return;
-        const idx = orders.indexOf(order);
-        if (idx !== -1) orders.splice(idx, 1);
-        saveOrders();
-        closeOrderDetail();
-        renderOrders();
-        renderBom();
-      });
-      actions.appendChild(updBtn);
-      actions.appendChild(clrBtn);
-      actions.appendChild(delBtn);
-      orderDetailBody.appendChild(actions);
-      }
-    } else {
-      orderDetailBody.appendChild(el("p", {
-        class: "orders-note",
-        text: "These BOM items have no RFx assigned (highlighted in the BOM). Set an RFx on them in the BOM's RFx column to move each into an order.",
-      }));
-    }
-
-    // Parts on this RFx: a collapsible section with its own "Show Included" toggle.
-    const parts = orderParts(order);
-    const partsSection = el("div", { class: "odf-parts" });
-    const capRow = el("div", { class: "odf-parts-caprow" });
-    const cap = el("button", { type: "button", class: "odf-parts-cap" });
-    const caret = el("span", { class: "odf-parts-caret", text: orderPartsCollapsed ? "▸" : "▾" });
-    cap.appendChild(caret);
-    cap.appendChild(el("span", { text: "Parts on this RFx (" + parts.length + ")" }));
-    capRow.appendChild(cap);
-    const copyPartsBtn = el("button", {
-      type: "button", class: "tool-btn odf-copy",
-      title: "Copy this RFx's parts list (all columns) to the clipboard (paste into Excel)",
-      text: "Copy Parts",
-    });
-    copyPartsBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      copyRfxParts(order, isNone ? "(none)" : ((order.rfx || "").trim() || "(no RFx)"));
-    });
-    capRow.appendChild(copyPartsBtn);
-    if (!READONLY) {
-      const inclBtn = el("button", {
+      // RFx cell carries the expand toggle that reveals this order's parts.
+      const rfxTd = orderTextCell(order, "rfx", tr);
+      rfxTd.classList.add("order-rfx-cell");
+      const isExpanded = expandedOrders.has(order.guid);
+      const expandToggle = el("button", {
         type: "button",
-        class: "tool-btn odf-incl" + (showIncludedInParent ? " active" : ""),
-        title: "Show or hide \"Included in Parent\" components in this parts list",
-        text: showIncludedInParent ? "Hide Included-in-Parent" : "Show Included-in-Parent",
+        class: "order-expand-toggle",
+        title: isExpanded ? "Hide parts" : "Show parts on this RFx",
+        text: isExpanded ? "▾" : "▸",
       });
-      inclBtn.addEventListener("click", (e) => {
+      expandToggle.addEventListener("click", (e) => {
         e.stopPropagation();
-        showIncludedInParent = !showIncludedInParent;
-        renderBom();
+        if (expandedOrders.has(order.guid)) expandedOrders.delete(order.guid);
+        else expandedOrders.add(order.guid);
         renderOrders();
-        openOrderDetail(order, isNone); // rebuild with the new parts set
       });
-      capRow.appendChild(inclBtn);
-    }
-    partsSection.appendChild(capRow);
+      const rfxInner = el("div", { class: "order-rfx-inner" });
+      rfxInner.appendChild(expandToggle);
+      rfxInner.appendChild(rfxTd.firstChild); // move the RFx input in beside the toggle
+      rfxTd.appendChild(rfxInner);
+      tr.appendChild(rfxTd);
 
-    const partsBody = el("div", { class: "odf-parts-body" });
-    partsBody.hidden = orderPartsCollapsed;
-    if (parts.length) {
-      const tbl = el("table", { class: "odf-parts-table" });
-      parts.forEach((p) => {
-        const r = el("tr");
-        r.appendChild(el("td", { class: "pn", text: p.partNumber || "" }));
-        r.appendChild(el("td", { class: "muted", text: p.description || "" }));
-        r.appendChild(el("td", { class: "num", text: String(p.totalQty) }));
-        tbl.appendChild(r);
-      });
-      partsBody.appendChild(tbl);
-    } else {
-      partsBody.appendChild(el("p", { class: "orders-note", text: "No BOM parts on this RFx yet." }));
-    }
-    partsSection.appendChild(partsBody);
-    cap.addEventListener("click", () => {
-      orderPartsCollapsed = !orderPartsCollapsed;
-      partsBody.hidden = orderPartsCollapsed;
-      caret.textContent = orderPartsCollapsed ? "▸" : "▾";
+      tr.appendChild(orderTextCell(order, "po", tr));
+      tr.appendChild(orderTextCell(order, "description", tr));
+      tr.appendChild(orderTextCell(order, "supplierName", tr));
+
+      if (READONLY) {
+        tr.appendChild(el("td", {}, [el("span", { class: "cell-readonly", text: order.deliveryDate || "" })]));
+        tr.appendChild(el("td", {}, [el("span", { class: "cell-readonly", text: order.status || "" })]));
+      } else {
+        const dateInput = el("input", { class: "cell-input", type: "date" });
+        dateInput.value = order.deliveryDate || "";
+        dateInput.addEventListener("change", () => {
+          order.deliveryDate = dateInput.value;
+          saveOrders();
+          renderBom();
+        });
+        tr.appendChild(el("td", {}, [dateInput]));
+
+        // Same option list as the BOM Status column.
+        const statusSelect = el("select", { class: "cell-select" });
+        statusSelect.appendChild(el("option", { value: "", text: "(none)" }));
+        statusOptions.forEach((opt) => statusSelect.appendChild(el("option", { value: opt, text: opt })));
+        if (order.status && statusOptions.indexOf(order.status) === -1) {
+          statusSelect.appendChild(el("option", { value: order.status, text: order.status + " (legacy)" }));
+        }
+        statusSelect.value = order.status || "";
+        statusSelect.addEventListener("change", () => {
+          order.status = statusSelect.value;
+          saveOrders();
+          renderBom();
+        });
+        tr.appendChild(el("td", {}, [statusSelect]));
+
+        const actionsTd = el("td", { class: "cell-actions" });
+        const menuBtn = el("button", { type: "button", class: "row-menu-btn", title: "Order actions", text: "⋮" });
+        menuBtn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          openPopupMenu(menuBtn, [
+            { label: "Update Status", onClick: () => applyOrderStatusToBom(order) },
+            { separator: true },
+            {
+              label: "Delete",
+              danger: true,
+              onClick: () => {
+                if (!window.confirm("Delete this order?")) return;
+                const idx = orders.indexOf(order);
+                if (idx !== -1) orders.splice(idx, 1);
+                saveOrders();
+                renderOrders();
+                renderBom();
+              },
+            },
+          ]);
+        });
+        actionsTd.appendChild(menuBtn);
+        tr.appendChild(actionsTd);
+      }
+
+      ordersTbody.appendChild(tr);
+      if (expandedOrders.has(order.guid)) ordersTbody.appendChild(renderOrderPartsRow(order));
     });
-    orderDetailBody.appendChild(partsSection);
 
-    if (ordersDetailView) ordersDetailView.hidden = false;
+    // The "(none)" bucket always sits at the end, after the real orders.
+    if (showNone) {
+      ordersTbody.appendChild(renderNoneBucketRow());
+      if (expandedOrders.has(NONE_BUCKET_GUID)) {
+        ordersTbody.appendChild(renderOrderPartsRow(noneBucketOrder()));
+      }
+    }
   }
 
   // ---------- Add Order dialog ----------
@@ -3646,7 +3325,6 @@
   const orderDescInput = document.getElementById("orderDescription");
   const orderSupplierInput = document.getElementById("orderSupplier");
   const orderDeliveryInput = document.getElementById("orderDelivery");
-  const orderPriceInput = document.getElementById("orderPrice");
   const orderStatusSelect = document.getElementById("orderStatus");
   const orderFormError = document.getElementById("orderFormError");
   const orderCancelBtn = document.getElementById("orderCancelBtn");
@@ -3681,7 +3359,6 @@
       description: orderDescInput.value.trim(),
       supplierName: orderSupplierInput.value.trim(),
       deliveryDate: orderDeliveryInput.value,
-      price: orderPriceInput.value === "" ? "" : Number(orderPriceInput.value),
       status: orderStatusSelect.value,
     });
     saveOrders();
@@ -3817,7 +3494,7 @@
     });
 
     if (changed) {
-      markDirty(); // parts kept in memory; persisted by saveAll
+      Store.saveParts(project.id, parts);
     }
   }
 
@@ -5073,7 +4750,7 @@
       added += 1;
     });
 
-    if (added || seen.size) markDirty();
+    if (added || seen.size) Store.saveOrders(project.id, orders);
     return added;
   }
 
@@ -5156,95 +4833,6 @@
     }
   });
 
-  // ---------- Manual data refresh ----------
-  // Re-pull this project's data from the server and re-render. Use it when the
-  // data looks stale (e.g. another session changed it) — the page loads data
-  // once, so it won't otherwise see outside changes. Current view, expand/
-  // collapse and selection are preserved.
-  function refreshData() {
-    if (dirty && !window.confirm("You have unsaved changes that will be discarded. Reload the latest data from the server anyway?")) return;
-    const fresh = Store.getProjectById(project.id);
-    if (fresh) Object.assign(project, fresh);
-    tree = Store.getBom(project.id);
-    statusOptions = Store.getStatusOptions();
-    customFields = Store.getCustomFields();
-    orders = Store.getOrders(project.id);
-    parts = Store.getParts(project.id);
-    dirty = false;
-    updateSaveUi();
-    populateDetailsForm();
-    renderBom();
-    renderOrders();
-    showToast("Data refreshed");
-  }
-
-  const refreshBtn = document.getElementById("refreshBtn");
-  if (refreshBtn) refreshBtn.addEventListener("click", refreshData);
-
-  // ---------- Theme toggle (rail) ----------
-  const themeBtn = document.getElementById("themeBtn");
-  if (themeBtn && window.MBOMTheme) {
-    const sunIcon = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2M12 20v2M4 12H2M22 12h-2M5 5 3.6 3.6M20.4 20.4 19 19M19 5l1.4-1.4M3.6 20.4 5 19"/></svg>';
-    const moonIcon = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A8.5 8.5 0 1 1 11.2 3a6.5 6.5 0 0 0 9.8 9.8z"/></svg>';
-    const themeIco = document.getElementById("themeIco");
-    const themeLabel = document.getElementById("themeLabel");
-    const paintTheme = () => {
-      const dark = window.MBOMTheme.effective() === "dark";
-      (themeIco || themeBtn).innerHTML = dark ? sunIcon : moonIcon;
-      if (themeLabel) themeLabel.textContent = dark ? "Light theme" : "Dark theme";
-    };
-    window.MBOMTheme.onChange = paintTheme;
-    paintTheme();
-    themeBtn.addEventListener("click", () => window.MBOMTheme.toggle());
-  }
-
-  // ---------- Shell: rail, home, settings, orders panel ----------
-  const lsGet = (k, d) => { try { const v = localStorage.getItem(k); return v === null ? d : v; } catch (e) { return d; } };
-  const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} };
-
-  const rail = document.getElementById("rail");
-  const railToggle = document.getElementById("railToggle");
-  if (rail && railToggle) {
-    const setPinned = (p) => { rail.classList.toggle("pinned", p); lsSet("mbomRailPinned", p ? "1" : "0"); };
-    railToggle.addEventListener("click", () => setPinned(!rail.classList.contains("pinned")));
-    setPinned(lsGet("mbomRailPinned", "0") === "1");
-  }
-
-  const homeBtn = document.getElementById("homeBtn");
-  if (homeBtn) homeBtn.addEventListener("click", () => { window.location.href = "index.html"; });
-
-  // Settings menu → Project Details / BOM Settings
-  const detailsDialog = document.getElementById("detailsDialog");
-  const detailsCancelBtn = document.getElementById("detailsCancelBtn");
-  function openDetailsDialog() { populateDetailsForm(); if (detailsDialog) detailsDialog.showModal(); }
-  if (detailsCancelBtn && detailsDialog) detailsCancelBtn.addEventListener("click", () => detailsDialog.close());
-  if (detailsDialog) detailsDialog.addEventListener("click", (e) => { if (e.target === detailsDialog) detailsDialog.close(); });
-  const settingsBtn = document.getElementById("settingsBtn");
-  if (settingsBtn) settingsBtn.addEventListener("click", () => {
-    openPopupMenu(settingsBtn, [
-      { label: "Project Details…", onClick: openDetailsDialog },
-      { label: "BOM Settings…", onClick: openBomSettings },
-    ]);
-  });
-
-  // Orders panel collapse/expand
-  const ordersPanel = document.getElementById("ordersPanel");
-  const ordersHandle = document.getElementById("ordersHandle");
-  function setOrdersCollapsed(c) {
-    if (!ordersPanel) return;
-    ordersPanel.classList.toggle("collapsed", c);
-    if (ordersHandle) ordersHandle.hidden = !c;
-    const t = document.getElementById("ordersToggle");
-    if (t) t.classList.toggle("active", !c);
-    lsSet("mbomOrdersCollapsed", c ? "1" : "0");
-  }
-  const ordersToggleBtn = document.getElementById("ordersToggle");
-  if (ordersToggleBtn) ordersToggleBtn.addEventListener("click", () => setOrdersCollapsed(!ordersPanel.classList.contains("collapsed")));
-  const ordersPanelClose = document.getElementById("ordersPanelClose");
-  if (ordersPanelClose) ordersPanelClose.addEventListener("click", () => setOrdersCollapsed(true));
-  if (ordersHandle) ordersHandle.addEventListener("click", () => setOrdersCollapsed(false));
-  setOrdersCollapsed(lsGet("mbomOrdersCollapsed", "0") === "1");
-
   // ---------- Init ----------
   populateDetailsForm();
   // Tree view and the RFx (grouped) view open fully collapsed.
@@ -5257,7 +4845,4 @@
   // is empty, so there's nothing manual to overwrite). Afterward the catalog
   // updates on every BOM save via saveBomTree → syncPartsFromBom.
   if (parts.length === 0) syncPartsFromBom();
-  // Initial load / bootstrap sync isn't a user edit — start clean.
-  dirty = false;
-  updateSaveUi();
 })();
