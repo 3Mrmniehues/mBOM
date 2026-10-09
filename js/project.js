@@ -2962,6 +2962,16 @@
   }
   const orderSortState = { key: null, dir: "asc" };
   const orderColumnFilters = {};
+  let orderSearchQuery = "";
+
+  // Columns shown in the compact Orders list — each one is click-to-sort and
+  // has a filter funnel in its header. (The full field set lives in
+  // ORDER_COLUMNS, which the free-text search below spans and the Copy uses.)
+  const ORDER_DISPLAY_COLUMNS = [
+    { key: "rfx", label: "RFx", cls: "oc-rfx" },
+    { key: "status", label: "Status", cls: "oc-status" },
+    { key: "description", label: "Description", cls: "oc-desc" },
+  ];
 
   function orderCellText(order, key) {
     const v = order[key];
@@ -2994,6 +3004,15 @@
       );
     }
 
+    // Free-text search spans every order field (RFx, PO, Description, Supplier,
+    // Delivery Date, Status, Price), case-insensitive substring match.
+    const q = orderSearchQuery.trim().toLowerCase();
+    if (q) {
+      list = list.filter((o) =>
+        ORDER_COLUMNS.some((c) => orderCellText(o, c.key).toLowerCase().indexOf(q) !== -1)
+      );
+    }
+
     if (orderSortState.key) {
       const key = orderSortState.key;
       const dir = orderSortState.dir === "asc" ? 1 : -1;
@@ -3010,35 +3029,62 @@
     return list;
   }
 
+  // Click a column to sort by it: 1st click ascending, 2nd descending, 3rd off.
+  function toggleOrderSort(key) {
+    if (orderSortState.key !== key) {
+      orderSortState.key = key;
+      orderSortState.dir = "asc";
+    } else if (orderSortState.dir === "asc") {
+      orderSortState.dir = "desc";
+    } else {
+      orderSortState.key = null;
+      orderSortState.dir = "asc";
+    }
+    renderOrders();
+  }
+
+  // Compact Orders header: each column is click-to-sort (with an arrow) and
+  // carries a filter funnel that opens the shared multi-select dropdown.
   function renderOrdersHeader() {
+    if (!ordersThead) return;
     ordersThead.innerHTML = "";
+    const row = el("tr");
+    ORDER_DISPLAY_COLUMNS.forEach((c) => {
+      const th = el("th", { class: "oc-th " + c.cls });
+      const inner = el("div", { class: "oc-th-inner" });
 
-    const headRow = el("tr");
-    ORDER_COLUMNS.forEach((c) => {
-      const arrow = orderSortState.key === c.key ? (orderSortState.dir === "asc" ? " ▲" : " ▼") : "";
-      const th = el("th", { class: "sortable" }, [el("span", { class: "th-label", text: c.label + arrow })]);
-      th.addEventListener("click", () => {
-        if (orderSortState.key === c.key) orderSortState.dir = orderSortState.dir === "asc" ? "desc" : "asc";
-        else {
-          orderSortState.key = c.key;
-          orderSortState.dir = "asc";
-        }
-        renderOrders();
+      const sorted = orderSortState.key === c.key;
+      const sortBtn = el("button", {
+        type: "button",
+        class: "oc-sort" + (sorted ? " active" : ""),
+        title: "Sort by " + c.label,
       });
-      headRow.appendChild(th);
-    });
-    if (!READONLY) headRow.appendChild(el("th", {}, [el("span", { class: "th-label", text: "Actions" })]));
-    ordersThead.appendChild(headRow);
+      sortBtn.appendChild(el("span", { class: "oc-sort-label", text: c.label }));
+      sortBtn.appendChild(el("span", {
+        class: "oc-sort-arrow",
+        text: sorted ? (orderSortState.dir === "asc" ? "▲" : "▼") : "",
+      }));
+      sortBtn.addEventListener("click", () => toggleOrderSort(c.key));
+      inner.appendChild(sortBtn);
 
-    const filterRow = el("tr", { class: "filter-row" });
-    ORDER_COLUMNS.forEach((c) => {
-      const td = el("td");
       const selected = getFilterSelected(orderColumnFilters, c.key);
-      td.appendChild(buildFilterControl(orderDistinctValues(c.key), selected, renderOrders));
-      filterRow.appendChild(td);
+      const funnel = el("button", {
+        type: "button",
+        class: "oc-funnel" + (selected.length ? " active" : ""),
+        title: selected.length ? "Filtered: " + selected.join(", ") : "Filter " + c.label,
+      });
+      funnel.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/></svg>';
+      funnel.addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (openFilterPanel && openFilterPanel._anchor === funnel) { closeFilterPanel(); return; }
+        openFilterDropdown(funnel, orderDistinctValues(c.key), selected, renderOrders);
+      });
+      inner.appendChild(funnel);
+
+      th.appendChild(inner);
+      row.appendChild(th);
     });
-    if (!READONLY) filterRow.appendChild(el("td")); // Actions column has no filter
-    ordersThead.appendChild(filterRow);
+    ordersThead.appendChild(row);
   }
 
   function saveOrders() {
@@ -3294,6 +3340,24 @@
   // ---------- Orders panel (compact RFx + Description -> detail form) ----------
   const ordersCountEl = document.getElementById("ordersCount");
   const ordersTotalCostEl = document.getElementById("ordersTotalCost");
+  const ordersSearchInput = document.getElementById("ordersSearch");
+  const ordersClearBtn = document.getElementById("ordersClearFilters");
+  if (ordersSearchInput) {
+    ordersSearchInput.addEventListener("input", () => {
+      orderSearchQuery = ordersSearchInput.value;
+      renderOrders();
+    });
+  }
+  if (ordersClearBtn) {
+    ordersClearBtn.addEventListener("click", () => {
+      orderSearchQuery = "";
+      if (ordersSearchInput) ordersSearchInput.value = "";
+      Object.keys(orderColumnFilters).forEach((k) => delete orderColumnFilters[k]);
+      orderSortState.key = null;
+      orderSortState.dir = "asc";
+      renderOrders();
+    });
+  }
   const ordersListView = document.getElementById("ordersListView");
   const ordersDetailView = document.getElementById("ordersDetailView");
   const orderDetailTitle = document.getElementById("orderDetailTitle");
@@ -3337,12 +3401,25 @@
   const bomFilterClear = document.getElementById("bomFilterClear");
   if (bomFilterClear) bomFilterClear.addEventListener("click", () => closeOrderDetail());
 
+  function ordersAnyFilterActive() {
+    return activeFilterKeys(orderColumnFilters).length > 0 ||
+      orderSearchQuery.trim() !== "" ||
+      !!orderSortState.key;
+  }
+  function updateOrdersClearBtn() {
+    if (ordersClearBtn) ordersClearBtn.hidden = !ordersAnyFilterActive();
+  }
+
   function renderOrders() {
     refreshIncludedToggleButton(showIncludedOrdersBtn);
+    renderOrdersHeader();
     ordersTbody.innerHTML = "";
     const visible = getVisibleOrders();
     const noneParts = unassignedParts();
-    const showNone = noneParts.length > 0;
+    // The synthetic "(none)" bucket isn't a real order, so hide it whenever a
+    // search/filter is narrowing the list (it has nothing to match against).
+    const narrowing = activeFilterKeys(orderColumnFilters).length > 0 || orderSearchQuery.trim() !== "";
+    const showNone = noneParts.length > 0 && !narrowing;
     const total = visible.length + (showNone ? 1 : 0);
     if (ordersCountEl) ordersCountEl.textContent = total + " RFx";
     if (ordersTotalCostEl) ordersTotalCostEl.textContent = "Total: " + formatCurrency(ordersTotalCost());
@@ -3351,7 +3428,7 @@
       ordersEmpty.hidden = false;
       ordersEmpty.textContent = orders.length === 0
         ? "No orders yet. Use \"+ Add Order\" to start."
-        : "No orders match the current filters.";
+        : "No orders match your search or filters.";
     } else {
       ordersEmpty.hidden = true;
     }
@@ -3360,6 +3437,7 @@
       const tr = el("tr");
       if (isNone) tr.classList.add("none-row");
       tr.appendChild(el("td", { class: "oc-rfx", text: isNone ? "(none)" : ((order.rfx || "").trim() || "(no RFx)") }));
+      tr.appendChild(el("td", { class: "oc-status", text: isNone ? "" : (order.status || "") }));
       tr.appendChild(el("td", { class: "oc-desc", text: isNone ? "BOM items with no RFx assigned" : (order.description || "") }));
       tr.addEventListener("click", () => openOrderDetail(order, isNone));
       ordersTbody.appendChild(tr);
@@ -3367,6 +3445,7 @@
     visible.forEach((o) => addRow(o, false));
     if (showNone) addRow(noneBucketOrder(), true);
 
+    updateOrdersClearBtn();
     if (activeOrder) applyBomHighlight(); // keep a open detail's highlight in sync
   }
 
