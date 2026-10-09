@@ -178,6 +178,12 @@ dialog#excelDataDialog::backdrop {
   padding: 14px;
 }
 
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.82rem;
+  word-break: break-all;
+}
+
 .excel-tip {
   margin: 0;
 }
