@@ -45,6 +45,23 @@ const Store = (function () {
     return apiRequest("DELETE", path);
   }
 
+  function apiPost(path, body) {
+    return apiRequest("POST", path, body);
+  }
+
+  // Where the app stores its data (the SQLite folder) + the Excel export path.
+  // Works before a data folder is configured (then configured:false).
+  function getDataInfo() {
+    return apiGet("/api/data-info");
+  }
+
+  // Set or relocate the data folder. Returns { ok, dbPath, migrated,
+  // restartRequired }. On first run it applies live (restartRequired:false);
+  // relocating an already-running instance needs a restart.
+  function setDataDir(path) {
+    return apiPost("/api/config/data-dir", { path: path });
+  }
+
   function makeId() {
     if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
     return "id-" + Date.now() + "-" + Math.floor(Math.random() * 1e9);
@@ -124,6 +141,8 @@ const Store = (function () {
 
   return {
     makeId,
+    getDataInfo,
+    setDataDir,
     getProjects,
     saveProjects,
     getProjectById,

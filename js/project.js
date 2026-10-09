@@ -329,6 +329,8 @@
   // Tree View line selection (session-scoped, by node guid). Persists across
   // search/collapse/re-render; drives the bulk-action bar.
   const selectedNodes = new Set();
+  // Anchor for Shift-click range selection (guid of the last row-checkbox click).
+  let lastSelectGuid = null;
   let treeSelectAllCheckbox = null;
   // B7/O4: when on, the Flat view and the Orders parts lists also show lines
   // flagged "Included in Parent" (normally hidden). Session-scoped.
@@ -1241,7 +1243,7 @@
     });
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
-      openPopupMenu(btn, [
+      const items = [
         { label: "Move Up", disabled: index === 0, onClick: () => moveNode(node.guid, -1) },
         { label: "Move Down", disabled: index >= siblingCount - 1, onClick: () => moveNode(node.guid, 1) },
         { label: "Move before…", onClick: () => openMoveDialog(node.guid, "before") },
@@ -1254,9 +1256,16 @@
         { separator: true },
         { label: "Indent", disabled: index === 0, onClick: () => indentNode(node.guid) },
         { label: "Outdent", disabled: depth === 0, onClick: () => outdentNode(node.guid) },
-        { separator: true },
-        { label: "Delete", danger: true, onClick: () => deleteNode(node.guid) },
-      ]);
+      ];
+      // Assemblies (rows with children) can push "Included in Parent" onto their
+      // whole sub-tree in one click.
+      if (node.children && node.children.length) {
+        items.push({ separator: true });
+        items.push({ label: "Mark all children Included in Parent", onClick: () => markSubtreeIncluded(node) });
+      }
+      items.push({ separator: true });
+      items.push({ label: "Delete", danger: true, onClick: () => deleteNode(node.guid) });
+      openPopupMenu(btn, items);
     });
 
     td.appendChild(btn);
@@ -1465,10 +1474,29 @@
         const selectTd = el("td", { class: "cell-select-col" });
         const rowCb = el("input", { type: "checkbox" });
         rowCb.checked = selectedNodes.has(node.guid);
-        rowCb.addEventListener("change", () => {
-          if (rowCb.checked) selectedNodes.add(node.guid);
-          else selectedNodes.delete(node.guid);
-          tr.classList.toggle("row-selected", rowCb.checked);
+        // Use "click" (not "change") so Shift-click range selection can read
+        // e.shiftKey; Space on a focused checkbox also fires click, so the
+        // keyboard still toggles.
+        rowCb.addEventListener("click", (e) => {
+          const guids = visibleTreeGuids();
+          const idx = guids.indexOf(node.guid);
+          const anchor = lastSelectGuid ? guids.indexOf(lastSelectGuid) : -1;
+          if (e.shiftKey && anchor !== -1 && idx !== -1) {
+            // Set the whole visible run between the anchor and this row to this
+            // checkbox's new state.
+            const lo = Math.min(anchor, idx);
+            const hi = Math.max(anchor, idx);
+            for (let i = lo; i <= hi; i++) {
+              if (rowCb.checked) selectedNodes.add(guids[i]);
+              else selectedNodes.delete(guids[i]);
+            }
+            refreshSelectionCheckboxes();
+          } else {
+            if (rowCb.checked) selectedNodes.add(node.guid);
+            else selectedNodes.delete(node.guid);
+            tr.classList.toggle("row-selected", rowCb.checked);
+          }
+          lastSelectGuid = node.guid;
           updateSelectionUi();
         });
         if (rowCb.checked) tr.classList.add("row-selected");
@@ -1556,6 +1584,7 @@
   const bomSelectionCount = document.getElementById("bomSelectionCount");
   const bulkSetStatusBtn = document.getElementById("bulkSetStatusBtn");
   const bulkSetRfxBtn = document.getElementById("bulkSetRfxBtn");
+  const bulkIncludedBtn = document.getElementById("bulkIncludedBtn");
   const bulkClearNotesBtn = document.getElementById("bulkClearNotesBtn");
   const bulkDeleteBtn = document.getElementById("bulkDeleteBtn");
   const bulkClearSelectionBtn = document.getElementById("bulkClearSelectionBtn");
@@ -1593,11 +1622,9 @@
     updateSelectAllState();
     updateSelectionBar();
   }
-  function toggleSelectAllVisible(checked) {
-    visibleTreeGuids().forEach((g) => {
-      if (checked) selectedNodes.add(g);
-      else selectedNodes.delete(g);
-    });
+  // Re-sync every visible row's checkbox + "row-selected" class from the
+  // selectedNodes set (after a Select-All or a Shift-click range change).
+  function refreshSelectionCheckboxes() {
     bomTbody.querySelectorAll("tr[data-guid]").forEach((tr) => {
       const cb = tr.querySelector('td.cell-select-col input[type="checkbox"]');
       if (cb) {
@@ -1605,6 +1632,13 @@
         tr.classList.toggle("row-selected", cb.checked);
       }
     });
+  }
+  function toggleSelectAllVisible(checked) {
+    visibleTreeGuids().forEach((g) => {
+      if (checked) selectedNodes.add(g);
+      else selectedNodes.delete(g);
+    });
+    refreshSelectionCheckboxes();
     updateSelectionUi();
   }
   function clearSelection() {
@@ -1649,6 +1683,65 @@
     );
     openPopupMenu(bulkSetRfxBtn, items);
   }
+  // Mark (or clear) "Included in Parent" on every selected line. Marking copies
+  // the parent's effective RFx/PO/Status into each line, matching the single-row
+  // checkbox (renderEditableCell). The parent map is built once for the batch.
+  function bulkSetIncludedInParent(value) {
+    const nodes = getSelectedNodeList();
+    if (nodes.length === 0) return;
+    const pm = value ? buildParentMap(tree, null) : null;
+    nodes.forEach((n) => {
+      n.includedInParent = value;
+      if (value) {
+        const parent = pm.get(n.guid);
+        if (parent) {
+          const info = resolveOrderInfo(parent, pm);
+          n.rfx = info.rfx;
+          n.po = lookupPoForRfx(info.rfx);
+          n.status = info.status;
+        }
+      }
+    });
+    saveBomTree();
+    renderBom();
+    renderOrders();
+    flashSaveIndicator();
+  }
+  function bulkIncluded() {
+    if (selectionCount() === 0) return;
+    openPopupMenu(bulkIncludedBtn, [
+      { label: "Mark as Included in Parent", onClick: () => bulkSetIncludedInParent(true) },
+      { label: "Clear (make editable)", onClick: () => bulkSetIncludedInParent(false) },
+    ]);
+  }
+  // One-click from an assembly's row menu: mark every descendant part as
+  // "Included in Parent", all riding on this assembly's own order. The owning
+  // order is resolved once (order-independent while we flip the flags).
+  function markSubtreeIncluded(node) {
+    const descendants = [];
+    (function collect(n) {
+      (n.children || []).forEach((c) => { descendants.push(c); collect(c); });
+    })(node);
+    if (descendants.length === 0) {
+      window.alert("This assembly has no child parts.");
+      return;
+    }
+    const label = (node.partNumber || "").trim() || "this assembly";
+    if (!window.confirm("Mark " + descendants.length + " child part" + (descendants.length === 1 ? "" : "s") +
+      " under " + label + " as Included in Parent? They'll inherit this assembly's RFx/PO/Status.")) return;
+    const pm = buildParentMap(tree, null);
+    const owner = resolveOrderInfo(node, pm); // the order this sub-tree rides on
+    descendants.forEach((c) => {
+      c.includedInParent = true;
+      c.rfx = owner.rfx;
+      c.po = lookupPoForRfx(owner.rfx);
+      c.status = owner.status;
+    });
+    saveBomTree();
+    renderBom();
+    renderOrders();
+    flashSaveIndicator();
+  }
   function bulkClearNotes() {
     const nodes = getSelectedNodeList().filter((n) => (n.notes || "").trim() !== "");
     if (nodes.length === 0) { window.alert("None of the selected lines have notes to clear."); return; }
@@ -1662,6 +1755,7 @@
 
   if (bulkSetStatusBtn) bulkSetStatusBtn.addEventListener("click", (e) => { e.stopPropagation(); bulkSetStatus(); });
   if (bulkSetRfxBtn) bulkSetRfxBtn.addEventListener("click", (e) => { e.stopPropagation(); bulkSetRfx(); });
+  if (bulkIncludedBtn) bulkIncludedBtn.addEventListener("click", (e) => { e.stopPropagation(); bulkIncluded(); });
   if (bulkClearNotesBtn) bulkClearNotesBtn.addEventListener("click", bulkClearNotes);
   if (bulkDeleteBtn) bulkDeleteBtn.addEventListener("click", bulkDelete);
   if (bulkClearSelectionBtn) bulkClearSelectionBtn.addEventListener("click", clearSelection);

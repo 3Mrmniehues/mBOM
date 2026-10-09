@@ -19,7 +19,17 @@
   const fieldStatus = document.getElementById("fieldStatus");
   const fieldDateCreated = document.getElementById("fieldDateCreated");
 
-  let projects = Store.getProjects();
+  // Before loading data, check the server has a data location configured. On a
+  // fresh install it won't — show first-run setup instead of a load error.
+  let dataInfo = null;
+  try {
+    dataInfo = Store.getDataInfo();
+  } catch (e) {
+    // Server unreachable; the first-run prompt is a reasonable fallback.
+  }
+  const dataConfigured = !!(dataInfo && dataInfo.configured);
+
+  let projects = dataConfigured ? Store.getProjects() : [];
   let sortKey = "dateCreated";
   let sortDir = "desc"; // "asc" | "desc"
 
@@ -385,8 +395,89 @@
     if (e.target === deleteProjectDialog) closeDeleteDialog();
   });
 
+  // ---------- Data location (first-run setup + change later) ----------
+  const dataLocationBtn = document.getElementById("dataLocationBtn");
+  const dataLocationDialog = document.getElementById("dataLocationDialog");
+  const dataLocationCurrent = document.getElementById("dataLocationCurrent");
+  const dataLocationNew = document.getElementById("dataLocationNew");
+  const dataLocationSaveBtn = document.getElementById("dataLocationSaveBtn");
+  const dataLocationMsg = document.getElementById("dataLocationMsg");
+  const dataLocationConfigPath = document.getElementById("dataLocationConfigPath");
+  const copyDbPathBtn = document.getElementById("copyDbPathBtn");
+  const closeDataLocationBtn = document.getElementById("closeDataLocationBtn");
+
+  const firstRunDialog = document.getElementById("firstRunDialog");
+  const firstRunPath = document.getElementById("firstRunPath");
+  const firstRunSaveBtn = document.getElementById("firstRunSaveBtn");
+  const firstRunError = document.getElementById("firstRunError");
+
+  function showDlMsg(text, isError) {
+    dataLocationMsg.textContent = text;
+    dataLocationMsg.className = "import-result " + (isError ? "error" : "success");
+    dataLocationMsg.hidden = false;
+  }
+
+  function openDataLocationDialog() {
+    let info = dataInfo;
+    try { info = Store.getDataInfo(); } catch (e) { /* use cached */ }
+    dataLocationCurrent.value = (info && info.dbPath) || "(unknown)";
+    dataLocationConfigPath.textContent = (info && info.configPath) || "";
+    dataLocationNew.value = "";
+    dataLocationMsg.hidden = true;
+    dataLocationDialog.showModal();
+  }
+  if (dataLocationBtn) dataLocationBtn.addEventListener("click", openDataLocationDialog);
+  if (closeDataLocationBtn) closeDataLocationBtn.addEventListener("click", () => dataLocationDialog.close());
+  dataLocationDialog.addEventListener("click", (e) => { if (e.target === dataLocationDialog) dataLocationDialog.close(); });
+  if (copyDbPathBtn) copyDbPathBtn.addEventListener("click", () => copyToClipboard(dataLocationCurrent.value, copyDbPathBtn));
+
+  if (dataLocationSaveBtn) dataLocationSaveBtn.addEventListener("click", () => {
+    const path = dataLocationNew.value.trim();
+    if (!path) { showDlMsg("Enter a folder path.", true); return; }
+    dataLocationSaveBtn.disabled = true;
+    try {
+      const res = Store.setDataDir(path);
+      const copied = res && res.migrated ? " Your existing data was copied there." : "";
+      showDlMsg("Saved." + copied + " Restart the app (close and reopen) to use the new location.", false);
+    } catch (err) {
+      showDlMsg(err.message, true);
+    } finally {
+      dataLocationSaveBtn.disabled = false;
+    }
+  });
+
+  // First-run: block until a data folder is chosen, then reload into the app.
+  firstRunDialog.addEventListener("cancel", (e) => e.preventDefault()); // not dismissible
+  function showFirstRun() {
+    firstRunPath.value = (dataInfo && dataInfo.suggestedDataDir) || "";
+    firstRunError.hidden = true;
+    firstRunDialog.showModal();
+    firstRunPath.focus();
+  }
+  if (firstRunSaveBtn) firstRunSaveBtn.addEventListener("click", () => {
+    const path = firstRunPath.value.trim();
+    if (!path) {
+      firstRunError.textContent = "Enter a folder path.";
+      firstRunError.className = "import-result error";
+      firstRunError.hidden = false;
+      return;
+    }
+    firstRunSaveBtn.disabled = true;
+    try {
+      Store.setDataDir(path);
+      location.reload(); // comes back configured
+    } catch (err) {
+      firstRunError.textContent = err.message;
+      firstRunError.className = "import-result error";
+      firstRunError.hidden = false;
+      firstRunSaveBtn.disabled = false;
+    }
+  });
+
   populateStatusOptions();
   // Open filtered to Active projects; "Clear filters" still resets to All.
   if (projects.some((p) => p.status === "Active")) statusFilter.value = "Active";
   render();
+
+  if (!dataConfigured) showFirstRun();
 })();
