@@ -176,10 +176,18 @@ BOM part-number autocomplete.
   table whenever any item lacks an RFx; expand it to see those items and assign
   each an RFx (which moves it to the matching order). It's display-only — not a
   stored order — and it's included in **Copy Table** and the read-only export.
-- **Sort and filter** the Orders table: click a column header to sort
-  (ascending/descending), and use the per-column **multi-select** filters
-  (choose several values per column, OR-matched). Sorting and filtering affect
-  the display only — the saved order sequence is unchanged.
+- **Search, sort, and filter the Orders panel:**
+  - A **search box** above the list matches text in *any* order field (RFx, PO,
+    Description, Supplier, Delivery Date, Status, Price), case-insensitive.
+  - The compact list shows **RFx · Status · Description**, and each column header
+    is **click-to-sort** — first click ascending, second descending, third off
+    (an ▲/▼ arrow shows the active column).
+  - Each header also has a **filter funnel** opening a **multi-select** dropdown
+    (pick several values per column, OR-matched, with its own value search).
+  - A **Clear** button resets the search, every filter, and the sort at once.
+  - Searching, sorting, and filtering affect the display only — the saved order
+    sequence is unchanged, and the synthetic **(none)** row is hidden while a
+    search or filter is narrowing the list.
 - **Copy Table** copies the visible orders to the clipboard as tab-separated
   text for Excel — and now includes **each order's parts** (the same list the
   expander shows), indented one column beneath their order, whether or not the
