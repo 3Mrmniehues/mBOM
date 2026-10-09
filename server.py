@@ -25,21 +25,42 @@ import traceback
 import urllib.parse
 from pathlib import Path
 
-# When packaged as a one-file .exe (PyInstaller) the bundled static site is
-# unpacked to a temporary folder (sys._MEIPASS) that is read-only and wiped
-# between runs, so the database, config, logs and export file must live next to
-# the .exe instead. BASE_DIR = where the static assets are; DATA_DIR = where
-# persistent files go. Running as a plain script, the two are the same folder,
-# so behaviour is unchanged.
+# BASE_DIR = where the static assets live (read-only when packaged as a one-file
+# PyInstaller .exe, which unpacks them to a temp sys._MEIPASS folder). LEGACY_DIR
+# = the app folder itself (next to the .exe when frozen), where this app used to
+# keep config.ini and data/app.db.
+#
+# The app folder may be a SHARED, cloud-synced SharePoint library, so per-user
+# settings and the database must NOT live there. Instead:
+#   * config.ini lives per-user at %LOCALAPPDATA%\\mBOM\\config.ini (not synced),
+#   * the database folder is chosen by the user (first-run prompt) and recorded
+#     in that config -- see resolve_data_dir() / apply_data_dir().
 if getattr(sys, "frozen", False):
     BASE_DIR = Path(sys._MEIPASS)                      # bundled static site (temp, read-only)
-    DATA_DIR = Path(sys.executable).resolve().parent   # persistent, next to the .exe
+    LEGACY_DIR = Path(sys.executable).resolve().parent  # the app folder, next to the .exe
 else:
     BASE_DIR = Path(__file__).resolve().parent
-    DATA_DIR = BASE_DIR
-DB_PATH = DATA_DIR / "data" / "app.db"
-CONFIG_PATH = DATA_DIR / "config.ini"
+    LEGACY_DIR = BASE_DIR
+
 PORT = 8791
+
+# Per-user, machine-local config dir (NOT cloud-synced).
+USER_DIR = Path(os.environ.get("LOCALAPPDATA") or Path.home()) / "mBOM"
+USER_CONFIG_PATH = USER_DIR / "config.ini"
+LEGACY_CONFIG_PATH = LEGACY_DIR / "config.ini"
+
+# Sample seed data is applied to a brand-new database only when explicitly
+# asked (dev/demo). Real installs start empty.
+SEED_SAMPLE = os.environ.get("BOM_SEED_SAMPLE", "").strip().lower() not in ("", "0", "false", "no")
+
+# Resolved once the data location is known (first-run choice, config, env var, or
+# legacy fallback). Until then the server runs "unconfigured" and the UI prompts
+# the user to choose a data folder. get_connection() reads DB_PATH, so these are
+# mutable module globals set by apply_data_dir().
+DATA_DIR_CHOSEN = None   # folder holding app.db
+DB_PATH = None
+EXPORT_JSON_PATH = None
+CONFIGURED = False
 
 # ---------------------------------------------------------------------------
 # Seed data (ported from the old js/data.js, used only to populate a brand
@@ -283,9 +304,10 @@ def init_db():
     conn.executescript(SCHEMA)
     conn.commit()
     migrate_db(conn)
-    row = conn.execute("SELECT COUNT(*) AS n FROM projects").fetchone()
-    if row["n"] == 0:
-        seed_database(conn)
+    if SEED_SAMPLE:
+        row = conn.execute("SELECT COUNT(*) AS n FROM projects").fetchone()
+        if row["n"] == 0:
+            seed_database(conn)
     conn.close()
 
 
@@ -335,8 +357,7 @@ def build_tree(rows):
     return roots
 
 
-ERROR_LOG = DATA_DIR / "server-error.log"
-DEFAULT_EXPORT_PATH = DATA_DIR / "data" / "export.json"
+ERROR_LOG = USER_DIR / "server-error.log"
 
 
 def log_problem(message):
@@ -347,44 +368,182 @@ def log_problem(message):
         sys.stderr.write(line + "\n")
         return
     try:
+        ERROR_LOG.parent.mkdir(parents=True, exist_ok=True)
         with open(ERROR_LOG, "a", encoding="utf-8") as fh:
             fh.write(line + "\n")
     except OSError:
         pass  # nothing else we can usefully do
 
 
-def resolve_export_path():
-    """Where the flat JSON snapshot is written. Kept configurable so the file
-    can live on a shared/network drive that other people query, rather than
-    inside the app folder. Precedence, first non-empty wins:
+# ---------------------------------------------------------------------------
+# Config file (per-user) + data-location resolution.
+# ---------------------------------------------------------------------------
 
-      1. BOM_EXPORT_PATH environment variable (power-user override).
-      2. config.ini  ->  [paths] export_json = <path>
-      3. Default: data/export.json next to this script (backward compatible).
+def _read_config_parser():
+    """Read settings from the legacy app-folder config.ini first, then the
+    per-user one, so a per-user value overrides a legacy value. Lets an older
+    single-machine install keep working while new settings are written
+    per-user."""
+    parser = configparser.ConfigParser()
+    for p in (LEGACY_CONFIG_PATH, USER_CONFIG_PATH):
+        if p.exists():
+            try:
+                parser.read(p, encoding="utf-8")
+            except (configparser.Error, OSError):
+                log_problem("Could not read %s:\n%s" % (p, traceback.format_exc()))
+    return parser
 
-    Relative paths resolve against the app folder; absolute paths — including
-    mapped drives (Z:\\...) and UNC shares (\\\\server\\share\\...) — are used
-    as-is. Any trouble reading config falls back to the default rather than
-    preventing the server from starting."""
-    raw = os.environ.get("BOM_EXPORT_PATH", "").strip()
-    if not raw and CONFIG_PATH.exists():
+
+def _config_get(section, option, fallback=""):
+    try:
+        return _read_config_parser().get(section, option, fallback=fallback).strip()
+    except configparser.Error:
+        return fallback
+
+
+def write_config_value(section, option, value):
+    """Persist one setting to the per-user config.ini, preserving other keys.
+    (ConfigParser drops comments, which is fine for this app-managed file; the
+    commented template lives in config.ini.example.)"""
+    USER_DIR.mkdir(parents=True, exist_ok=True)
+    parser = configparser.ConfigParser()
+    if USER_CONFIG_PATH.exists():
         try:
-            parser = configparser.ConfigParser()
-            parser.read(CONFIG_PATH, encoding="utf-8")
-            raw = parser.get("paths", "export_json", fallback="").strip()
+            parser.read(USER_CONFIG_PATH, encoding="utf-8")
         except (configparser.Error, OSError):
-            log_problem("Could not read config.ini; using the default export "
-                        "path:\n" + traceback.format_exc())
-            raw = ""
-    if not raw:
-        return DEFAULT_EXPORT_PATH
-    path = Path(raw).expanduser()
-    if not path.is_absolute():
-        path = (DATA_DIR / path).resolve()
-    return path
+            pass
+    if not parser.has_section(section):
+        parser.add_section(section)
+    parser.set(section, option, value)
+    with open(USER_CONFIG_PATH, "w", encoding="utf-8") as fh:
+        parser.write(fh)
 
 
-EXPORT_JSON_PATH = resolve_export_path()
+def _sanitize_path_component(p):
+    """Turn a filesystem path into a single safe folder name, e.g.
+    C:\\Users\\me\\mBOM\\Dev  ->  C_Users_me_mBOM_Dev."""
+    name = re.sub(r"[^A-Za-z0-9._-]+", "_", str(p)).strip("_-.")
+    return name or "app"
+
+
+def app_backup_export_path():
+    """The computed flat-JSON snapshot location: one level ABOVE the app folder,
+    in a folder called "backup data", in a sub-folder named after the app
+    folder's full path (so copies synced to different machines/paths don't
+    collide), file bom-data.json. The app folder is where server.py / the .exe
+    lives (LEGACY_DIR)."""
+    app_dir = LEGACY_DIR
+    return app_dir.parent / "backup data" / _sanitize_path_component(app_dir) / "bom-data.json"
+
+
+def default_export_path():
+    """The export location used when no BOM_EXPORT_PATH override is set."""
+    return app_backup_export_path()
+
+
+def resolve_export_path():
+    """Where the flat JSON snapshot is written, and record it in the config.
+
+      1. BOM_EXPORT_PATH environment variable (one-off override; not recorded).
+      2. Otherwise the computed per-install backup location
+         (app_backup_export_path()), which is written into the per-user config's
+         [paths] export_json so the active path is explicit.
+
+    Relative env paths resolve against the data folder (or app folder); absolute
+    paths — including mapped drives (Z:\\...) and UNC shares
+    (\\\\server\\share\\...) — are used as-is."""
+    env = os.environ.get("BOM_EXPORT_PATH", "").strip()
+    if env:
+        path = Path(env).expanduser()
+        if not path.is_absolute():
+            path = ((DATA_DIR_CHOSEN or LEGACY_DIR) / path).resolve()
+        return path
+    computed = app_backup_export_path()
+    # Keep the config in sync with the computed path (idempotent: only writes
+    # when it differs, and never fatal if the config can't be written).
+    try:
+        if _config_get("paths", "export_json") != str(computed):
+            write_config_value("paths", "export_json", str(computed))
+    except OSError:
+        log_problem("Could not record export_json in config:\n" + traceback.format_exc())
+    return computed
+
+
+def resolve_data_dir():
+    """The folder that holds app.db, or None if not yet configured (first run).
+    Precedence, first non-empty wins:
+
+      1. BOM_DATA_DIR environment variable.
+      2. config.ini  ->  [paths] data_dir = <folder>
+      3. Legacy app-folder data/ if it already contains app.db (keeps an
+         existing single-machine install working, with no data move).
+      4. None -> the UI prompts the user to choose a data folder."""
+    raw = os.environ.get("BOM_DATA_DIR", "").strip() or _config_get("paths", "data_dir")
+    if raw:
+        p = Path(raw).expanduser()
+        if not p.is_absolute():
+            p = (LEGACY_DIR / p).resolve()
+        return p
+    legacy_data = LEGACY_DIR / "data"
+    if (legacy_data / "app.db").exists():
+        return legacy_data
+    return None
+
+
+def migrate_db_file(old_db, new_db):
+    """Copy an existing app.db to a new location when the target has none, so a
+    relocation never loses data. Uses SQLite's backup API for a consistent copy
+    even if the source is mid-write."""
+    if new_db.exists() or not (old_db and Path(old_db).exists()):
+        return False
+    new_db.parent.mkdir(parents=True, exist_ok=True)
+    src = sqlite3.connect(str(old_db))
+    try:
+        dst = sqlite3.connect(str(new_db))
+        try:
+            src.backup(dst)
+        finally:
+            dst.close()
+    finally:
+        src.close()
+    return True
+
+
+def apply_data_dir(path):
+    """Make `path` the live data folder: ensure it exists, set the DB/export
+    paths, initialise the database, and mark the server configured."""
+    global DATA_DIR_CHOSEN, DB_PATH, EXPORT_JSON_PATH, CONFIGURED
+    path = Path(path)
+    path.mkdir(parents=True, exist_ok=True)
+    DATA_DIR_CHOSEN = path
+    DB_PATH = path / "app.db"
+    EXPORT_JSON_PATH = resolve_export_path()
+    CONFIGURED = True
+    init_db()
+
+
+def suggested_data_dir():
+    """A sensible pre-filled path for the first-run prompt: a per-user, local
+    (non-synced) folder."""
+    return str(USER_DIR / "data")
+
+
+def data_info_payload():
+    """State for the UI: whether a data folder is set, and the resolved paths.
+    Works before configuration (then most paths are blank)."""
+    exp = str(EXPORT_JSON_PATH) if EXPORT_JSON_PATH else ""
+    default_exp = default_export_path()
+    return {
+        "configured": CONFIGURED,
+        "dataDir": str(DATA_DIR_CHOSEN) if DATA_DIR_CHOSEN else "",
+        "dbPath": str(DB_PATH) if DB_PATH else "",
+        "exportPath": exp,
+        "exportConfigured": bool(EXPORT_JSON_PATH and default_exp and EXPORT_JSON_PATH != default_exp),
+        "suggestedDataDir": suggested_data_dir(),
+        "configPath": str(USER_CONFIG_PATH),
+        # Legacy key kept for existing app.js (it reads info.filePath).
+        "filePath": exp,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -685,6 +844,42 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return self._handle_api("DELETE")
         self._send_json(405, {"error": "Method not allowed"})
 
+    def _handle_set_data_dir(self, body):
+        """Set (or relocate) the folder that holds app.db. Creates the folder,
+        copies an existing database in when the target has none, records the
+        choice in the per-user config, and — on first run — applies it live so
+        the app is usable without a restart. Relocating an already-running
+        instance only writes the config and asks for a restart (swapping the DB
+        under a live session isn't safe)."""
+        raw = ((body or {}).get("path") or "").strip()
+        if not raw:
+            return self._send_json(400, {"error": "Enter a folder path for your data."})
+        new_dir = Path(raw).expanduser()
+        if not new_dir.is_absolute():
+            return self._send_json(400, {"error": "Enter a full (absolute) folder path, e.g. " + suggested_data_dir()})
+        try:
+            new_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            return self._send_json(400, {"error": "Could not create that folder: " + str(e)})
+        try:
+            was_configured = CONFIGURED
+            migrated = migrate_db_file(DB_PATH, new_dir / "app.db")
+            write_config_value("paths", "data_dir", str(new_dir))
+            if not was_configured:
+                apply_data_dir(new_dir)
+                write_export_file()
+                return self._send_json(200, {
+                    "ok": True, "dbPath": str(DB_PATH), "migrated": migrated,
+                    "restartRequired": False,
+                })
+            return self._send_json(200, {
+                "ok": True, "dbPath": str(new_dir / "app.db"), "migrated": migrated,
+                "restartRequired": True,
+            })
+        except Exception as e:
+            log_problem("Set data-dir failed:\n" + traceback.format_exc())
+            return self._send_json(500, {"error": str(e)})
+
     def _handle_api(self, method):
         path = urllib.parse.urlsplit(self.path).path
         # Read the body up front. Under HTTP/1.1 keep-alive an unread request
@@ -700,6 +895,22 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 threading.Thread(target=_httpd.shutdown, daemon=True).start()
             return self._send_json(200, {"ok": True, "stopping": True})
 
+        # Routes that must work even before a data location is configured (they
+        # don't touch the database): report config state, and set the data dir.
+        if path == "/api/data-info" and method == "GET":
+            return self._send_json(200, data_info_payload())
+
+        if path == "/api/config/data-dir" and method == "POST":
+            return self._handle_set_data_dir(body)
+
+        # Everything below needs the database. Until the user has chosen a data
+        # folder, tell the UI to run its first-run setup instead of erroring.
+        if not CONFIGURED:
+            return self._send_json(409, {
+                "error": "No data location is configured yet.",
+                "needsSetup": True,
+            })
+
         try:
             conn = get_connection()
             try:
@@ -709,10 +920,6 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     qs = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
                     project_filter = qs.get("project", [None])[0]
                     return self._send_json(200, build_export_payload(conn, project_filter))
-
-                if path == "/api/data-info" and method == "GET":
-                    # Lets the UI show the on-disk path of the kept-in-sync file.
-                    return self._send_json(200, {"filePath": str(EXPORT_JSON_PATH)})
 
                 if path == "/api/projects" and method == "GET":
                     rows = conn.execute("SELECT * FROM projects").fetchall()
@@ -894,8 +1101,12 @@ class Server(http.server.ThreadingHTTPServer):
 
 def main():
     global _httpd
-    init_db()
-    write_export_file()  # write the Excel/query JSON snapshot at start
+    # Locate the data folder (env/config/legacy). If there isn't one yet, start
+    # unconfigured and let the UI prompt for it on first run.
+    data_dir = resolve_data_dir()
+    if data_dir is not None:
+        apply_data_dir(data_dir)
+        write_export_file()  # write the Excel/query JSON snapshot at start
     try:
         server = Server(("localhost", PORT), Handler)
     except OSError:
@@ -906,12 +1117,16 @@ def main():
 
     _httpd = server  # let the /api/shutdown route stop us gracefully
 
-    default_note = "" if EXPORT_JSON_PATH == DEFAULT_EXPORT_PATH else "  (relocated via config)"
     print("Serving " + str(BASE_DIR) + " at http://localhost:" + str(PORT))
-    print("Database: " + str(DB_PATH))
-    print("Excel data URL: http://localhost:" + str(PORT) + "/api/data.json")
-    print("Excel data file: " + str(EXPORT_JSON_PATH) + default_note)
-    print("  (written at start and stop, not on every change)")
+    if CONFIGURED:
+        default_note = "" if EXPORT_JSON_PATH == default_export_path() else "  (relocated via config)"
+        print("Database: " + str(DB_PATH))
+        print("Excel data URL: http://localhost:" + str(PORT) + "/api/data.json")
+        print("Excel data file: " + str(EXPORT_JSON_PATH) + default_note)
+        print("  (written at start and stop, not on every change)")
+    else:
+        print("No data folder configured yet - open the app to choose where your")
+        print("data is stored (settings are saved to " + str(USER_CONFIG_PATH) + ").")
     print("Press Ctrl+C to stop.")
     try:
         server.serve_forever()
@@ -919,7 +1134,8 @@ def main():
         print("\nShutting down.")
         server.shutdown()
     finally:
-        write_export_file()  # write the snapshot on the way out (start/stop only)
+        if CONFIGURED:
+            write_export_file()  # write the snapshot on the way out (start/stop only)
     return 0
 
 

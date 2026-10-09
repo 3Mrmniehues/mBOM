@@ -5,10 +5,13 @@ cd /d "%~dp0"
 set PORT=8791
 set URL=http://localhost:%PORT%
 
-rem Optional: write the Excel/query JSON file to a shared drive so others can
-rem read it. Prefer setting export_json in config.ini; uncomment the next line
-rem only for a quick one-off override (it wins over config.ini).
+rem Data location + the Excel/query JSON path are configured in the app
+rem ("Data Location" dialog) and saved per-user to %LOCALAPPDATA%\mBOM\config.ini,
+rem so nothing here needs editing. The lines below are optional one-off overrides
+rem (they win over config.ini); uncomment only if you need them.
+rem set BOM_DATA_DIR=D:\mBOM\data
 rem set BOM_EXPORT_PATH=Z:\Shared\mBOM\bom-data.json
+rem set BOM_SEED_SAMPLE=1
 
 rem If the server is already listening, just open the browser. Starting a
 rem second copy on the same port causes requests to land on whichever

@@ -92,11 +92,19 @@ This log groups the work by area rather than by date.
 - **Row actions** consolidated into a 3-dots menu: Move Up/Down, **Move
   before…/after…**, Insert Above/Below, **Insert Rows…** (a dialog asks how
   many blank rows to drop in below the line), Add Sub-Item, Indent, Outdent,
-  Delete. Larger expand/collapse handles.
+  Delete — plus **Mark all children Included in Parent** on assembly rows.
+  Larger expand/collapse handles.
 - **Select lines + bulk actions:** a checkbox column (with a select-all header)
   lets you pick any number of Tree-view lines; a bar then offers **Set Status**,
-  **Set RFx**, **Clear Notes**, and **Delete** on just the selected lines, plus
-  Clear selection. The selection is kept as you search, filter, and collapse.
+  **Set RFx**, **Included in Parent** (mark/clear), **Clear Notes**, and
+  **Delete** on just the selected lines, plus Clear selection. The selection is
+  kept as you search, filter, and collapse. **Shift-click** a row's checkbox to
+  select the whole run between it and your last click.
+- **Mark many lines Included in Parent at once:** the bulk **Included in
+  Parent → Mark** action flags every selected line and copies each one's parent
+  RFx/PO/Status in; an assembly's row menu also has **Mark all children Included
+  in Parent**, which does the whole sub-tree in one click (they inherit that
+  assembly's order).
 - **Move before/after a chosen part:** instead of nudging a line one row at a
   time, pick **Move before…** or **Move after…** and choose the target part
   from a type-to-search list (item no · 3M part number · description). The line
@@ -227,22 +235,36 @@ BOM part-number autocomplete.
 
 ## Data storage & Excel connection
 
-- Data moved from browser storage to a **SQLite database** (`data/app.db`) via
+- Data moved from browser storage to a **SQLite database** (`app.db`) via
   `server.py`, so clearing the browser no longer affects data.
+- **Configurable, per-user data location.** The database no longer has to live
+  in the app folder. On first run the app asks where to store your data (a
+  folder on your PC); you can change it later from **Data Location** on the home
+  page, which copies the existing database to the new folder and takes effect on
+  restart. The choice is saved per-user at `%LOCALAPPDATA%\mBOM\config.ini`
+  (overridable by the `BOM_DATA_DIR` environment variable). This lets the **app
+  files be hosted on a shared/SharePoint-synced folder** while each person's data
+  stays local and independent — a live SQLite file never sits in the synced
+  folder. See **Deploying on SharePoint** in the README.
+- **Empty start:** a brand-new database is created empty (no sample projects).
+  Set `BOM_SEED_SAMPLE=1` before launching to load the old demo data instead.
 - **Excel data connection:** a live endpoint (`/api/data.json`, for Power
   Query "From Web", always current) and a JSON file written when the app
   **starts** and **stops** — not on every edit, so ongoing work never touches
   the (possibly shared) file. Both expose flat, spreadsheet-friendly `projects`
   / `orders` / `bomLines` tables. Discoverable via the Excel Data dialog; to
   refresh the file mid-session, restart the app.
-- **Shareable data file:** the JSON file can be relocated out of the app folder
-  onto a shared/network drive so others can query it, by setting `export_json`
-  in `config.ini` (or the `BOM_EXPORT_PATH` environment variable); it defaults
-  to `data/export.json`. The server stays `localhost`-only — only the file is
-  shared. Writes are hardened (auto-created target folder, unique temp file +
-  atomic rename, retry when the file is briefly locked). To make the on-stop
-  write reliable for the windowless server, `stop-app.bat` triggers a graceful
-  shutdown (`POST /api/shutdown`) and only force-kills as a fallback.
+- **Snapshot stored in a per-install backup folder:** the JSON file is written
+  **one level above the app folder**, under
+  `backup data\<app-folder-full-path>\bom-data.json` — the sub-folder named after
+  the app's full path keeps snapshots from different machines/synced copies from
+  colliding. The app computes this and **records the `export_json` path into your
+  per-user `config.ini`** automatically (set `BOM_EXPORT_PATH` to override for a
+  run). The server stays `localhost`-only — only the file is shared. Writes are
+  hardened (auto-created target folders, unique temp file + atomic rename, retry
+  when the file is briefly locked). To make the on-stop write reliable for the
+  windowless server, `stop-app.bat` triggers a graceful shutdown
+  (`POST /api/shutdown`) and only force-kills as a fallback.
 
 ## Running the app / infrastructure
 

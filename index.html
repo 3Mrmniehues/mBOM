@@ -21,6 +21,7 @@
     </div>
     <div class="header-buttons">
       <button type="button" class="theme-btn" id="themeBtn" title="Toggle light / dark theme" aria-label="Toggle theme"></button>
+      <button type="button" class="secondary-btn" id="dataLocationBtn" title="Choose where mBOM stores your data">Data Location</button>
       <button type="button" class="secondary-btn" id="excelDataBtn">Excel Data</button>
       <button type="button" class="new-project-btn" id="newProjectBtn">+ New Project</button>
       <button type="button" class="close-app-btn" id="closeAppBtn" title="Stop the local server and close the app">Close App</button>
@@ -161,8 +162,9 @@
         <button type="button" class="tool-btn" id="copyPathBtn">Copy</button>
       </div>
       <p class="excel-note">To let others query this file, move it to a shared
-        drive by setting <strong>export_json</strong> in <strong>config.ini</strong>
-        (in the app folder), then restart the app.</p>
+        drive by setting <strong>export_json</strong> in your
+        <strong>config.ini</strong> (shown under <strong>Data Location</strong>),
+        then restart the app.</p>
       <p class="excel-note">Or grab a one-off snapshot now:</p>
       <button type="button" class="tool-btn" id="downloadJsonBtn">Download JSON snapshot</button>
     </section>
@@ -173,6 +175,61 @@
     </p>
 
     <button type="button" class="settings-close" id="closeExcelDialogBtn">Close</button>
+  </div>
+</dialog>
+
+<!-- First-run: choose where the database is stored. Shown automatically when
+     no data location has been configured yet (blocks until set). -->
+<dialog id="firstRunDialog">
+  <div class="excel-data-body">
+    <h2>Welcome to mBOM</h2>
+    <p class="excel-intro">
+      Choose a folder on <strong>this PC</strong> where mBOM will keep your data
+      (a single SQLite database). The app files can live in a shared/SharePoint
+      folder, but your data stays here, under your control.
+    </p>
+    <section class="excel-option">
+      <h3>Data folder</h3>
+      <div class="copy-row">
+        <input type="text" id="firstRunPath" placeholder="e.g. C:\Users\you\AppData\Local\mBOM\data">
+      </div>
+      <p class="excel-note">
+        A local, non-synced folder (or an SSD) is safest. You <em>can</em> use a
+        OneDrive folder to back it up, but editing the same database on two PCs
+        at once via cloud sync can cause conflicts. You can change this later
+        from <strong>Data Location</strong>.
+      </p>
+      <p class="import-result" id="firstRunError" hidden></p>
+    </section>
+    <button type="button" class="new-project-btn" id="firstRunSaveBtn">Use this folder</button>
+  </div>
+</dialog>
+
+<!-- Change the data location after setup. -->
+<dialog id="dataLocationDialog">
+  <div class="excel-data-body">
+    <h2>Data location</h2>
+    <p class="excel-intro">mBOM stores everything in one SQLite database here:</p>
+    <div class="copy-row">
+      <input type="text" id="dataLocationCurrent" readonly>
+      <button type="button" class="tool-btn" id="copyDbPathBtn">Copy</button>
+    </div>
+    <section class="excel-option">
+      <h3>Move to a new folder</h3>
+      <p>Enter a full folder path. Your current database is copied there, and the
+        app uses it after you restart.</p>
+      <div class="copy-row">
+        <input type="text" id="dataLocationNew" placeholder="e.g. D:\mBOM\data or C:\Users\you\OneDrive\mBOM">
+        <button type="button" class="tool-btn" id="dataLocationSaveBtn">Save</button>
+      </div>
+      <p class="excel-note">
+        A local/SSD folder is safest for a live database. OneDrive works for
+        backup, but can conflict if edited on two PCs at once.
+      </p>
+      <p class="import-result" id="dataLocationMsg" hidden></p>
+    </section>
+    <p class="excel-note">Settings are saved to <span id="dataLocationConfigPath" class="mono"></span>.</p>
+    <button type="button" class="settings-close" id="closeDataLocationBtn">Close</button>
   </div>
 </dialog>
 

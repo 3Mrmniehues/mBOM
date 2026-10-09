@@ -1,30 +1,39 @@
-# mBOM app configuration  --  TEMPLATE
+# mBOM app configuration  --  TEMPLATE / REFERENCE
 # ----------------------------------------------------------------------------
-# Copy this file to "config.ini" in the app folder, then edit your copy.
-# config.ini is git-ignored, so your personal path never gets committed.
+# You normally DON'T need to edit this by hand. The app writes your settings to
+# a per-user file at:
 #
-# Optional. If config.ini is missing, or the setting below is left blank/
-# commented, the app writes its query file to
-#     data\export.json   (inside the app folder).
+#     %LOCALAPPDATA%\mBOM\config.ini        (e.g. C:\Users\<you>\AppData\Local\mBOM)
 #
-# To make the data easy for other people to query, point export_json at a
-# shared/network location. The app writes a flat, spreadsheet-friendly JSON
-# snapshot there when it starts and stops (restart to refresh it); others open
-# it from Excel (Power Query) or their own scripts. The app server itself still
-# runs only on this machine
-# (http://localhost:8791) - only the file is shared.
-#
-# Notes:
-#   * Remove the leading "#" on the export_json line to activate it.
-#   * Absolute paths are used as-is; this includes mapped drives (Z:\...) and
-#     UNC shares (\\server\share\...). Windows backslashes are fine here - do
-#     not double them.
-#   * A relative path is taken relative to the app folder.
-#   * The target folder is created automatically if it doesn't exist.
-#   * Naming the file bom-data.json at the destination keeps it recognizable.
-#   * A one-off override without editing this file: set the BOM_EXPORT_PATH
-#     environment variable (it takes precedence over this file).
+# using the in-app "Data Location" dialog. That per-user location is deliberate:
+# the app folder itself may be a shared, cloud-synced SharePoint library, so
+# each person's settings and data must live outside it. This template documents
+# the keys in case you want to set them manually.
 
 [paths]
-# export_json = Z:\Shared\mBOM\bom-data.json
-# export_json = \\fileserver\engineering\mBOM\bom-data.json
+
+# data_dir -- the folder that holds the SQLite database (app.db). This is your
+# actual data. Put it somewhere local and NOT inside the synced app folder.
+# A local disk / SSD path is safest for a live database; OneDrive works for
+# backup but can conflict if the same database is edited on two PCs at once.
+# If unset, the app asks you to choose a folder on first run.
+#   data_dir = C:\Users\you\AppData\Local\mBOM\data
+#   data_dir = D:\mBOM\data
+
+# export_json -- the flat, spreadsheet-friendly JSON snapshot (refreshed when the
+# app starts and stops; query it from Excel / Power Query). The app COMPUTES this
+# automatically and writes the line here, so you don't set it by hand: it goes one
+# level ABOVE the app folder, into
+#     <app parent>\backup data\<app-folder-full-path>\bom-data.json
+# (the per-install sub-folder keeps snapshots from different machines/paths apart).
+# To send it somewhere else for a single run, set the BOM_EXPORT_PATH environment
+# variable instead (it overrides this and is not written back).
+#   export_json = C:\Users\you\OneDrive\mBOM\backup data\C_Users_you_...\bom-data.json
+
+# Notes:
+#   * Absolute paths are used as-is; this includes mapped drives (Z:\...) and
+#     UNC shares (\\server\share\...). Windows backslashes are fine - do not
+#     double them.
+#   * The target folders are created automatically if they don't exist.
+#   * One-off overrides without editing this file: set the BOM_DATA_DIR or
+#     BOM_EXPORT_PATH environment variables (they take precedence over the file).

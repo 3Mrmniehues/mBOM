@@ -21,17 +21,33 @@ Data is stored in a local SQLite database, not the browser, so it survives clear
 
 3. Open **http://localhost:8791** in your browser.
 
-That's it. On first run, the server creates `data/app.db` and fills it with a handful of sample projects and one sample BOM so there's something to look at. After that, the database is the source of truth — the sample data is never re-applied.
+On first run the app asks **where to store your data** — pick a folder on your PC
+(see [Where your data lives](#where-your-data-lives)). It then creates an **empty**
+`app.db` there and you're ready to go. (To start with sample projects/BOM for a
+demo, set the `BOM_SEED_SAMPLE=1` environment variable before launching.)
 
-To stop the server, press `Ctrl+C` in the terminal.
+To stop the server, press `Ctrl+C` in the terminal (or use `stop-app.bat`).
 
 ## Where your data lives
 
-Everything — projects, BOM items, status options, custom fields — is stored in `data/app.db`, a standard SQLite file. You can:
+Everything — projects, BOM items, status options, custom fields — is stored in a
+single SQLite file, **`app.db`**, in a folder **you choose**. The app files and
+your data are kept separate on purpose, so the app can be hosted/shared while each
+person's data stays on their own machine (see
+[Deploying on SharePoint](#deploying-on-sharepoint)).
 
-- Back it up by copying that one file.
-- Inspect or edit it directly with any SQLite tool (e.g. [DB Browser for SQLite](https://sqlitebrowser.org/), or Python's built-in `sqlite3` module) while the server isn't writing to it.
-- Delete it to reset the app back to the seeded sample data (the server will recreate it on the next run).
+- **Choosing / changing the folder:** the first-run prompt sets it; change it later
+  via **Data Location** on the home page. Changing it copies your existing database
+  to the new folder and takes effect after you restart the app.
+- **Where it's remembered:** your choice is saved per-user at
+  `%LOCALAPPDATA%\mBOM\config.ini` (not in the app folder, so it isn't shared or
+  cloud-synced). The **Data Location** dialog shows the exact paths.
+- **Pick a safe spot:** a local disk / SSD folder is safest for a live SQLite
+  database. OneDrive works for automatic backup, but editing the *same* database on
+  two PCs at once through cloud sync can cause conflicts.
+- You can back it up by copying that one file, inspect/edit it with any SQLite tool
+  (e.g. [DB Browser for SQLite](https://sqlitebrowser.org/)) while the app isn't
+  writing, or delete it to start fresh (empty) on the next run.
 
 ## Connecting Excel (data connection)
 
@@ -47,60 +63,75 @@ details, or use either of these directly:
   the server is `localhost`-only.)
 - **Shared file:** a JSON snapshot is refreshed when the app **starts** and when
   it **stops** — not on every edit — so restart the app to update it. In Excel
-  use **Get Data → From File → From JSON**. By default it's `data/export.json`
-  inside the app folder — see below to move it somewhere others can reach.
-  (For always-current data, use the live web connection above instead.)
+  use **Get Data → From File → From JSON** and point it at the snapshot (see
+  below for its location, also shown in the **Data Location** dialog). (For
+  always-current data, use the live web connection above instead.)
 
 In Power Query, pick the `bomLines`, `projects`, or `orders` table, choose
 **Into Table**, and expand the columns.
 
-### Sharing the data file with others
+### Where the shared JSON file lives
 
-To let teammates query the data without running the app, move the JSON file to
-a shared/network drive. The app stays `localhost`-only — only the file is
-shared.
+The app writes the snapshot to a **backup location one level above the app
+folder**, and records the path in your config automatically:
 
-1. Copy `config.ini.example` to `config.ini` in the app folder (if you don't
-   already have a `config.ini`). Your `config.ini` is git-ignored, so your
-   personal path is never committed.
-2. In `config.ini`, under `[paths]`, uncomment `export_json` and set it to the
-   destination, e.g.
+```
+<app parent>\backup data\<app-folder-full-path>\bom-data.json
+```
 
-   ```ini
-   [paths]
-   export_json = Z:\Shared\mBOM\bom-data.json
-   # or a UNC path:
-   # export_json = \\fileserver\engineering\mBOM\bom-data.json
-   ```
+For example, an app synced to `C:\Users\you\OneDrive\mBOM\Dev` writes to
+`C:\Users\you\OneDrive\mBOM\backup data\C_Users_you_OneDrive_mBOM_Dev\bom-data.json`.
+The per-install sub-folder (named after the app's full path) keeps snapshots from
+different machines or synced copies from colliding. The folders are created
+automatically, and the resolved `export_json` path is written into your per-user
+config (`%LOCALAPPDATA%\mBOM\config.ini`).
 
-3. Restart the app. The target folder is created if needed, and the file is
-   written there when the app starts and stops. The **Excel Data** dialog and
-   the startup log show the active path.
+To send the snapshot somewhere else (e.g. a shared network drive) for a run, set
+the `BOM_EXPORT_PATH` environment variable — it overrides the computed path and
+is not written back. `stop-app.bat` shuts the server down cleanly so the final
+write runs.
 
-Notes:
+## Deploying on SharePoint
 
-- Absolute paths (including mapped drives and `\\server\share` UNC paths) are
-  used as-is; a relative path is taken relative to the app folder. Windows
-  backslashes work directly — don't double them.
-- For a one-off override without editing the file, set the `BOM_EXPORT_PATH`
-  environment variable; it takes precedence over `config.ini`.
-- The snapshot is written on start and on a graceful stop. `stop-app.bat` asks
-  the server to shut down cleanly (via `POST /api/shutdown`) so that final write
-  runs; a forced kill would skip it. To refresh mid-session, restart the app.
+The app is designed so the **program files** can be hosted centrally while each
+person's **data** stays on their own PC:
+
+1. Put this folder in a **SharePoint document library** and have each user **sync**
+   it to their PC (OneDrive → *Sync*). Tip: right-click the synced folder →
+   **Always keep on this device** so `server.py`, Python, and the batch files are
+   actually present locally. **Don't include a personal `config.ini` or `data/`
+   folder** in what you upload — those are per-user (they're git-ignored); each
+   user's config and database are created on their own machine on first run.
+2. Each user launches the app the usual way (`start-app.bat` or the mBOM shortcut).
+   On **first run** they're asked to pick a **data folder on their own PC** — a
+   local/SSD path is recommended; OneDrive is allowed for backup.
+3. That choice is saved to **their** `%LOCALAPPDATA%\mBOM\config.ini`, which is
+   *not* in the synced library — so every user keeps an independent database even
+   though the app folder is shared. The database never lives in the SharePoint
+   folder, so there's no cross-user clobbering or sync churn on a live SQLite file.
+
+The app runs on `localhost` only; SharePoint just distributes the files.
 
 ## Project structure
 
 ```
-index.html        Home page — project list, search/filter/sort, create project
+index.html         Home page — project list, search/filter/sort, data location
 project.html       Project detail page — edit project fields, manage BOM
 css/               Stylesheets
-js/app.js          Home page logic
-js/project.js      Project detail + BOM logic (all four views, import/export, settings)
+js/app.js          Home page logic (incl. first-run / data-location setup)
+js/project.js      Project detail + BOM logic (all views, import/export, settings)
 js/store.js        Data layer — talks to server.py's API instead of localStorage
 server.py          Local server: serves the static files and a JSON API, backed by SQLite
-config.ini         Optional settings — e.g. relocate the Excel JSON file to a shared drive
-data/app.db         SQLite database (created on first run)
-data/export.json    Default location of the flat JSON snapshot for Excel (relocatable via config.ini)
+config.ini.example Reference for the per-user config (data_dir / export_json)
+```
+
+Per-user, outside the app folder (not committed, not synced):
+
+```
+%LOCALAPPDATA%\mBOM\config.ini   Your settings (chosen data folder, export path)
+<your data folder>\app.db        Your SQLite database (location you choose)
+<app parent>\backup data\<app-path>\bom-data.json
+                                 Flat JSON snapshot for Excel (computed; override via BOM_EXPORT_PATH)
 ```
 
 ## Notes
